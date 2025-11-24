@@ -212,6 +212,8 @@ func (s *Server) createZone(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Ensure SOA exists right after zone creation when auto is enabled
+	dbm.BumpSOASerialAuto(s.db, z, s.cfg.SOA.AutoOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
 	// Invalidate DNS zone cache
 	if s.dnsServer != nil {
 		s.dnsServer.InvalidateZoneCache()
