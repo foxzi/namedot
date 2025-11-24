@@ -71,6 +71,9 @@ api_token: "devtoken"
 rest_listen: ":8080"
 auto_soa_on_missing: true
 default_ttl: 300
+soa:
+  primary: "ns1.{zone}"
+  hostmaster: "hostmaster.{zone}"
 
 db:
   driver: "sqlite"

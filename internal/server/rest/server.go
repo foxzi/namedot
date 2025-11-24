@@ -337,7 +337,7 @@ func (s *Server) createRRSet(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing)
+	dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
 	// Invalidate DNS cache after zone record change
 	if s.dnsServer != nil {
 		s.dnsServer.InvalidateZoneCache()
@@ -385,7 +385,7 @@ func (s *Server) updateRRSet(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing)
+	dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
 	// Invalidate DNS cache after zone record change
 	if s.dnsServer != nil {
 		s.dnsServer.InvalidateZoneCache()
@@ -477,7 +477,7 @@ func (s *Server) importZone(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing)
+		dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
 		// Invalidate DNS cache after zone import
 		if s.dnsServer != nil {
 			s.dnsServer.InvalidateZoneCache()
@@ -488,7 +488,7 @@ func (s *Server) importZone(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing)
+		dbm.BumpSOASerialAuto(s.db, z, s.cfg.AutoSOAOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
 		// Invalidate DNS cache after zone import
 		if s.dnsServer != nil {
 			s.dnsServer.InvalidateZoneCache()
