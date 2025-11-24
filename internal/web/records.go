@@ -395,6 +395,9 @@ func (s *Server) createRecord(c *gin.Context) {
 		return
 	}
 
+	// Ensure SOA exists/updated after change
+	db.BumpSOASerialAuto(s.db, zone, s.cfg.SOA.AutoOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
+
 	// Return updated records list
 	c.Params = append(c.Params, gin.Param{Key: "id", Value: fmt.Sprintf("%d", zoneID)})
 	s.listRecords(c)
@@ -407,9 +410,24 @@ func (s *Server) deleteRecord(c *gin.Context) {
 		return
 	}
 
+	var record db.RData
+	if err := s.db.First(&record, id).Error; err != nil {
+		c.String(http.StatusNotFound, s.tr(c, "Record not found"))
+		return
+	}
+
 	if err := s.db.Delete(&db.RData{}, id).Error; err != nil {
 		c.String(http.StatusInternalServerError, s.tr(c, "Error deleting record"))
 		return
+	}
+
+	// Ensure SOA exists/updated after change
+	var rrset db.RRSet
+	if err := s.db.First(&rrset, record.RRSetID).Error; err == nil {
+		var zone db.Zone
+		if err := s.db.First(&zone, rrset.ZoneID).Error; err == nil {
+			db.BumpSOASerialAuto(s.db, zone, s.cfg.SOA.AutoOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
+		}
 	}
 
 	c.Status(http.StatusOK)

@@ -194,6 +194,7 @@ func (s *Server) updateRecord(c *gin.Context) {
 	mxPriorityStr := c.PostForm("mx_priority")
 	zoneIDStr := c.PostForm("zone_id")
 	rrsetIDStr := c.PostForm("rrset_id")
+	zoneIDParsed, _ := strconv.ParseUint(zoneIDStr, 10, 32)
 
 	if data == "" {
 		c.String(http.StatusBadRequest, `<div class="error">`+s.tr(c, "Data is required")+`</div>`)
@@ -219,9 +220,9 @@ func (s *Server) updateRecord(c *gin.Context) {
 
 	// If this RRSet is CNAME and data is "@", store apex FQDN
 	var rrset db.RRSet
+	var zone db.Zone
 	rrsetID, _ := strconv.ParseUint(rrsetIDStr, 10, 32)
 	if err := s.db.First(&rrset, rrsetID).Error; err == nil {
-		var zone db.Zone
 		_ = s.db.First(&zone, rrset.ZoneID).Error
 		if strings.EqualFold(rrset.Type, "CNAME") && strings.TrimSpace(data) == "@" {
 			// Need zone name for apex
@@ -257,9 +258,13 @@ func (s *Server) updateRecord(c *gin.Context) {
 		}
 	}
 
+	// Ensure SOA exists/updated after change
+	if err := s.db.First(&zone, zoneIDParsed).Error; err == nil {
+		db.BumpSOASerialAuto(s.db, zone, s.cfg.SOA.AutoOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
+	}
+
 	// Return updated records list
-	zoneID, _ := strconv.ParseUint(zoneIDStr, 10, 32)
-	c.Params = append(c.Params, gin.Param{Key: "id", Value: fmt.Sprintf("%d", zoneID)})
+	c.Params = append(c.Params, gin.Param{Key: "id", Value: fmt.Sprintf("%d", zoneIDParsed)})
 	s.listRecords(c)
 }
 
