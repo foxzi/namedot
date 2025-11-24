@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"namedot/internal/config"
 	"namedot/internal/db"
@@ -189,19 +190,15 @@ func main() {
 		if err := db.ImportZones(gormDB, importFile, importMode); err != nil {
 			log.Fatalf("import failed: %v", err)
 		}
-		if cfg.SOA.AutoOnMissing || cfg.AutoSOAOnMissing {
-			var zones []db.Zone
-			if err := gormDB.Find(&zones).Error; err == nil {
-				for _, z := range zones {
-					db.BumpSOASerialAuto(gormDB, z, true, cfg.SOA.Primary, cfg.SOA.Hostmaster)
-				}
-			}
-		}
+		ensureAllSOA(gormDB, cfg)
 		var count int64
 		gormDB.Model(&db.Zone{}).Count(&count)
 		fmt.Printf("Successfully imported zones. Total zones in database: %d\n", count)
 		return
 	}
+
+	// Ensure SOA exists/updated on startup when auto is enabled
+	ensureAllSOA(gormDB, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -250,4 +247,19 @@ func main() {
 
 	_ = restServer.Shutdown(shutdownCtx)
 	_ = dnsServer.Shutdown()
+}
+
+// ensureAllSOA creates/updates SOA for all zones if auto is enabled.
+func ensureAllSOA(gormDB *gorm.DB, cfg *config.Config) {
+	if !(cfg.SOA.AutoOnMissing || cfg.AutoSOAOnMissing) {
+		return
+	}
+	var zones []db.Zone
+	if err := gormDB.Find(&zones).Error; err != nil {
+		log.Printf("SOA ensure: failed to load zones: %v", err)
+		return
+	}
+	for _, z := range zones {
+		db.BumpSOASerialAuto(gormDB, z, true, cfg.SOA.Primary, cfg.SOA.Hostmaster)
+	}
 }

@@ -76,6 +76,13 @@ func BumpSOASerialAuto(db *gorm.DB, zone Zone, auto bool, primary, hostmaster st
 	if len(parts) < 7 {
 		return
 	}
+	zname := strings.TrimSuffix(strings.ToLower(zone.Name), ".")
+	if primary != "" {
+		parts[0] = resolveSOAName(primary, zname, parts[0])
+	}
+	if hostmaster != "" {
+		parts[1] = resolveSOAName(hostmaster, zname, parts[1])
+	}
 	if n, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
 		n++
 		parts[2] = strconv.FormatInt(n, 10)
