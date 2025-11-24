@@ -1,11 +1,11 @@
 package web
 
 import (
-    "fmt"
-    "net/http"
-    "net/url"
-    "strconv"
-    "strings"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"namedot/internal/db"
@@ -28,16 +28,16 @@ func intPtr(i int) *int {
 
 func (s *Server) listRecords(c *gin.Context) {
 	zoneID, err := strconv.ParseUint(c.Param("id"), 10, 32)
-    if err != nil {
-        c.String(http.StatusBadRequest, s.tr(c, "Invalid zone ID"))
-        return
-    }
+	if err != nil {
+		c.String(http.StatusBadRequest, s.tr(c, "Invalid zone ID"))
+		return
+	}
 
-    var zone db.Zone
-    if err := s.db.First(&zone, zoneID).Error; err != nil {
-        c.String(http.StatusNotFound, s.tr(c, "Zone not found"))
-        return
-    }
+	var zone db.Zone
+	if err := s.db.First(&zone, zoneID).Error; err != nil {
+		c.String(http.StatusNotFound, s.tr(c, "Zone not found"))
+		return
+	}
 
 	// Get pagination, search, and filter parameters
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -215,7 +215,7 @@ func (s *Server) listRecords(c *gin.Context) {
 func (s *Server) newRecordForm(c *gin.Context) {
 	zoneID := c.Param("id")
 
-html := fmt.Sprintf(`
+	html := fmt.Sprintf(`
     <div style="background: #f7fafc; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
         <h3>%s</h3>
         <form hx-post="/admin/zones/%s/records" hx-target="#zones-list" hx-swap="innerHTML"
@@ -257,6 +257,13 @@ html := fmt.Sprintf(`
                     style="width: 100%%; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
             </div>
 
+            <div id="mx-priority-wrapper" style="grid-column: span 2; display: none;">
+                <label>%s</label>
+                <input type="number" name="mx_priority" value="10" min="0"
+                    style="width: 100%%; max-width: 200px; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
+                <small style="color: #718096;">%s</small>
+            </div>
+
             <div style="grid-column: span 2;">
                 <strong>%s</strong>
             </div>
@@ -293,47 +300,63 @@ html := fmt.Sprintf(`
                 </button>
             </div>
         </form>
-    </div>`, s.tr(c, "Add New Record"), zoneID, s.tr(c, "Name"), s.tr(c, "Use '@' for zone apex"), s.tr(c, "Type"), s.tr(c, "TTL (seconds)"), s.tr(c, "Data (IP/Value)"), s.tr(c, "GeoIP Targeting (optional)"), s.tr(c, "Country Code"), s.tr(c, "Continent Code"), s.tr(c, "ASN"), s.tr(c, "Subnet"), s.tr(c, "Add Record"), zoneID, s.tr(c, "Cancel"))
+    </div>
+    <script>
+    (function() {
+        const typeSelect = document.querySelector('select[name="type"]');
+        const dataInput = document.querySelector('input[name="data"]');
+        const mxWrapper = document.getElementById('mx-priority-wrapper');
+        function toggleMX() {
+            const isMX = typeSelect.value === 'MX';
+            mxWrapper.style.display = isMX ? 'block' : 'none';
+            dataInput.placeholder = isMX ? 'mail.example.com.' : '192.0.2.1';
+        }
+        typeSelect.addEventListener('change', toggleMX);
+        toggleMX();
+    })();
+    </script>
+    `, s.tr(c, "Add New Record"), zoneID, s.tr(c, "Name"), s.tr(c, "Use '@' for zone apex"), s.tr(c, "Type"), s.tr(c, "TTL (seconds)"), s.tr(c, "Data (IP/Value)"), s.tr(c, "MX Priority"), s.tr(c, "Lower value = higher priority (only for MX)"), s.tr(c, "GeoIP Targeting (optional)"), s.tr(c, "Country Code"), s.tr(c, "Continent Code"), s.tr(c, "ASN"), s.tr(c, "Subnet"), s.tr(c, "Add Record"), zoneID, s.tr(c, "Cancel"))
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(http.StatusOK, html)
 }
 
 func (s *Server) createRecord(c *gin.Context) {
-    zoneID, err := strconv.ParseUint(c.Param("id"), 10, 32)
-    if err != nil {
-        c.String(http.StatusBadRequest, s.tr(c, "Invalid zone ID"))
-        return
-    }
+	zoneID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, s.tr(c, "Invalid zone ID"))
+		return
+	}
 
-    // Load zone for FQDN normalization
-    var zone db.Zone
-    if err := s.db.First(&zone, zoneID).Error; err != nil {
-        c.String(http.StatusNotFound, s.tr(c, "Zone not found"))
-        return
-    }
+	// Load zone for FQDN normalization
+	var zone db.Zone
+	if err := s.db.First(&zone, zoneID).Error; err != nil {
+		c.String(http.StatusNotFound, s.tr(c, "Zone not found"))
+		return
+	}
 
-    name := c.PostForm("name")
+	name := c.PostForm("name")
 	recType := strings.ToUpper(c.PostForm("type"))
 	data := c.PostForm("data")
 	ttlStr := c.PostForm("ttl")
+	mxPriorityStr := c.PostForm("mx_priority")
 	country := c.PostForm("country")
 	continent := c.PostForm("continent")
 	asnStr := c.PostForm("asn")
 	subnet := c.PostForm("subnet")
 
-    if name == "" || recType == "" || data == "" {
-        c.String(http.StatusBadRequest, `<div class="error">`+s.tr(c, "Name, type, and data are required")+`</div>`)
-        return
-    }
+	if name == "" || recType == "" || data == "" {
+		c.String(http.StatusBadRequest, `<div class="error">`+s.tr(c, "Name, type, and data are required")+`</div>`)
+		return
+	}
 
-    // Normalize name to FQDN; handle @/empty as zone apex
-    name = toFQDN(name, zone.Name)
+	// Normalize name to FQDN; handle @/empty as zone apex
+	name = toFQDN(name, zone.Name)
 
-    // For CNAME data, treat "@" as zone apex and store FQDN
-    if strings.EqualFold(recType, "CNAME") && strings.TrimSpace(data) == "@" {
-        data = toFQDN("@", zone.Name)
-    }
+	// For CNAME data, treat "@" as zone apex and store FQDN
+	if strings.EqualFold(recType, "CNAME") && strings.TrimSpace(data) == "@" {
+		data = toFQDN("@", zone.Name)
+	}
 
 	ttl, _ := strconv.Atoi(ttlStr)
 	if ttl <= 0 {
@@ -345,9 +368,16 @@ func (s *Server) createRecord(c *gin.Context) {
 		asn, _ = strconv.Atoi(asnStr)
 	}
 
+	mxPriority := 10
+	if mxPriorityStr != "" {
+		if p, err := strconv.Atoi(mxPriorityStr); err == nil && p >= 0 {
+			mxPriority = p
+		}
+	}
+
 	// Find or create RRSet
 	var rrset db.RRSet
-    result := s.db.Where("zone_id = ? AND name = ? AND type = ?", zoneID, name, recType).First(&rrset)
+	result := s.db.Where("zone_id = ? AND name = ? AND type = ?", zoneID, name, recType).First(&rrset)
 	if result.Error != nil {
 		// Create new RRSet
 		rrset = db.RRSet{
@@ -356,13 +386,16 @@ func (s *Server) createRecord(c *gin.Context) {
 			Type:   recType,
 			TTL:    uint32(ttl),
 		}
-        if err := s.db.Create(&rrset).Error; err != nil {
-            c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error creating record set: %s"), err.Error()))
-            return
-        }
-    }
+		if err := s.db.Create(&rrset).Error; err != nil {
+			c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error creating record set: %s"), err.Error()))
+			return
+		}
+	}
 
 	// Add record data
+	if strings.EqualFold(recType, "MX") {
+		data = combineMXData(data, mxPriority, zone.Name)
+	}
 	record := db.RData{
 		RRSetID:   rrset.ID,
 		Data:      data,
@@ -372,10 +405,10 @@ func (s *Server) createRecord(c *gin.Context) {
 		Subnet:    stringPtr(subnet),
 	}
 
-    if err := s.db.Create(&record).Error; err != nil {
-        c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error creating record: %s"), err.Error()))
-        return
-    }
+	if err := s.db.Create(&record).Error; err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error creating record: %s"), err.Error()))
+		return
+	}
 
 	// Return updated records list
 	c.Params = append(c.Params, gin.Param{Key: "id", Value: fmt.Sprintf("%d", zoneID)})
@@ -384,15 +417,15 @@ func (s *Server) createRecord(c *gin.Context) {
 
 func (s *Server) deleteRecord(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-    if err != nil {
-        c.Status(http.StatusBadRequest)
-        return
-    }
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
 
-    if err := s.db.Delete(&db.RData{}, id).Error; err != nil {
-        c.String(http.StatusInternalServerError, s.tr(c, "Error deleting record"))
-        return
-    }
+	if err := s.db.Delete(&db.RData{}, id).Error; err != nil {
+		c.String(http.StatusInternalServerError, s.tr(c, "Error deleting record"))
+		return
+	}
 
 	c.Status(http.StatusOK)
 }
@@ -400,17 +433,50 @@ func (s *Server) deleteRecord(c *gin.Context) {
 // toFQDN normalizes a relative name to FQDN within the given zone name.
 // If name is empty or "@", returns the zone origin with trailing dot.
 func toFQDN(name, zone string) string {
-    n := strings.TrimSpace(strings.ToLower(name))
-    // Treat trailing ".@" as convenience suffix for "relative to zone apex"
-    if strings.HasSuffix(n, ".@") {
-        n = strings.TrimSuffix(n, ".@")
-    }
-    z := strings.TrimSuffix(strings.ToLower(zone), ".")
-    if n == "" || n == "@" {
-        return z + "."
-    }
-    if strings.HasSuffix(n, ".") {
-        return n
-    }
-    return n + "." + z + "."
+	n := strings.TrimSpace(strings.ToLower(name))
+	// Treat trailing ".@" as convenience suffix for "relative to zone apex"
+	if strings.HasSuffix(n, ".@") {
+		n = strings.TrimSuffix(n, ".@")
+	}
+	z := strings.TrimSuffix(strings.ToLower(zone), ".")
+	if n == "" || n == "@" {
+		return z + "."
+	}
+	if strings.HasSuffix(n, ".") {
+		return n
+	}
+	return n + "." + z + "."
+}
+
+// splitMXData extracts priority and target if present, otherwise returns defaults.
+func splitMXData(data string) (int, string) {
+	fields := strings.Fields(strings.TrimSpace(data))
+	if len(fields) >= 2 {
+		if p, err := strconv.Atoi(fields[0]); err == nil {
+			return p, strings.Join(fields[1:], " ")
+		}
+	}
+	return 10, strings.TrimSpace(data)
+}
+
+// combineMXData formats MX data with priority, unless data already includes priority.
+func combineMXData(data string, priority int, zoneName string) string {
+	d := strings.TrimSpace(data)
+	if d == "" {
+		return ""
+	}
+	fields := strings.Fields(d)
+	if len(fields) >= 2 {
+		if _, err := strconv.Atoi(fields[0]); err == nil {
+			// Already contains priority, return normalized string
+			return strings.Join(fields, " ")
+		}
+	}
+	if d == "@" {
+		d = toFQDN("@", zoneName)
+	}
+	if priority < 0 {
+		priority = 0
+	}
+	return fmt.Sprintf("%d %s", priority, d)
 }
