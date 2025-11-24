@@ -257,7 +257,7 @@ func (s *Server) newRecordForm(c *gin.Context) {
                     style="width: 100%%; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
             </div>
 
-            <div id="mx-priority-wrapper" style="grid-column: span 2; display: none;">
+            <div id="mx-priority-wrapper" style="grid-column: span 2;">
                 <label>%s</label>
                 <input type="number" name="mx_priority" value="10" min="0"
                     style="width: 100%%; max-width: 200px; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
@@ -300,22 +300,7 @@ func (s *Server) newRecordForm(c *gin.Context) {
                 </button>
             </div>
         </form>
-    </div>
-    <script>
-    (function() {
-        const typeSelect = document.querySelector('select[name="type"]');
-        const dataInput = document.querySelector('input[name="data"]');
-        const mxWrapper = document.getElementById('mx-priority-wrapper');
-        function toggleMX() {
-            const isMX = typeSelect.value === 'MX';
-            mxWrapper.style.display = isMX ? 'block' : 'none';
-            dataInput.placeholder = isMX ? 'mail.example.com.' : '192.0.2.1';
-        }
-        typeSelect.addEventListener('change', toggleMX);
-        toggleMX();
-    })();
-    </script>
-    `, s.tr(c, "Add New Record"), zoneID, s.tr(c, "Name"), s.tr(c, "Use '@' for zone apex"), s.tr(c, "Type"), s.tr(c, "TTL (seconds)"), s.tr(c, "Data (IP/Value)"), s.tr(c, "MX Priority"), s.tr(c, "Lower value = higher priority (only for MX)"), s.tr(c, "GeoIP Targeting (optional)"), s.tr(c, "Country Code"), s.tr(c, "Continent Code"), s.tr(c, "ASN"), s.tr(c, "Subnet"), s.tr(c, "Add Record"), zoneID, s.tr(c, "Cancel"))
+    </div>`, s.tr(c, "Add New Record"), zoneID, s.tr(c, "Name"), s.tr(c, "Use '@' for zone apex"), s.tr(c, "Type"), s.tr(c, "TTL (seconds)"), s.tr(c, "Data (IP/Value)"), s.tr(c, "MX Priority"), s.tr(c, "Lower value = higher priority (only for MX)"), s.tr(c, "GeoIP Targeting (optional)"), s.tr(c, "Country Code"), s.tr(c, "Continent Code"), s.tr(c, "ASN"), s.tr(c, "Subnet"), s.tr(c, "Add Record"), zoneID, s.tr(c, "Cancel"))
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(http.StatusOK, html)
