@@ -87,3 +87,38 @@ func TestImportJSON_NoDefaultTTL_KeepsZeroTTL(t *testing.T) {
     }
     if set.TTL != 0 { t.Fatalf("expected ttl 0 to be preserved, got %d", set.TTL) }
 }
+
+func TestImportJSON_Replace_RemovesMissingRRSet(t *testing.T) {
+    db := newTestDB(t)
+    z := dbm.Zone{Name: "example4.com"}
+    if err := db.Create(&z).Error; err != nil {
+        t.Fatalf("create zone: %v", err)
+    }
+    // initial zone with A and MX
+    initial := dbm.Zone{RRSets: []dbm.RRSet{
+        {Name: "example4.com.", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "192.0.2.10"}}},
+        {Name: "example4.com.", Type: "MX", TTL: 300, Records: []dbm.RData{{Data: "mail.example4.com."}}},
+    }}
+    if err := ImportJSON(db, &z, &initial, "replace", 0); err != nil {
+        t.Fatalf("seed import: %v", err)
+    }
+
+    // new payload without MX (should remove it when replace)
+    updated := dbm.Zone{RRSets: []dbm.RRSet{
+        {Name: "example4.com.", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "192.0.2.20"}}},
+    }}
+    if err := ImportJSON(db, &z, &updated, "replace", 0); err != nil {
+        t.Fatalf("import replace: %v", err)
+    }
+
+    var sets []dbm.RRSet
+    if err := db.Where("zone_id = ?", z.ID).Find(&sets).Error; err != nil {
+        t.Fatalf("load rrsets: %v", err)
+    }
+    if len(sets) != 1 {
+        t.Fatalf("expected 1 rrset after replace, got %d", len(sets))
+    }
+    if sets[0].Type != "A" {
+        t.Fatalf("expected only A rrset, got %s", sets[0].Type)
+    }
+}
