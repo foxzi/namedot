@@ -49,8 +49,9 @@ type ReplicationConfig struct {
 }
 
 type SOAConfig struct {
-	Primary    string `yaml:"primary"`    // MNAME (e.g. ns1.{zone})
-	Hostmaster string `yaml:"hostmaster"` // RNAME (e.g. hostmaster.{zone})
+	Primary       string `yaml:"primary"`         // MNAME (e.g. ns1.{zone})
+	Hostmaster    string `yaml:"hostmaster"`      // RNAME (e.g. hostmaster.{zone})
+	AutoOnMissing bool   `yaml:"auto_on_missing"` // Auto-create SOA when missing
 }
 
 type Config struct {
@@ -64,9 +65,10 @@ type Config struct {
 	TLSKeyFile       string    `yaml:"tls_key_file"`   // Path to TLS private key file for HTTPS
 	TLSReloadSec     int       `yaml:"tls_reload_sec"` // Certificate reload interval in seconds (0 = no reload)
 	AllowedCIDRs     []string  `yaml:"allowed_cidrs"`  // List of allowed CIDR blocks for REST API access (empty = allow all)
-	AutoSOAOnMissing bool      `yaml:"auto_soa_on_missing"`
 	DefaultTTL       uint32    `yaml:"default_ttl"`
 	SOA              SOAConfig `yaml:"soa"`
+	// Deprecated: use soa.auto_on_missing instead
+	AutoSOAOnMissing bool `yaml:"auto_soa_on_missing"`
 
 	DB          DBConfig          `yaml:"db"`
 	GeoIP       GeoIPConfig       `yaml:"geoip"`
@@ -107,6 +109,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.TLSReloadSec == 0 && cfg.IsTLSEnabled() {
 		cfg.TLSReloadSec = 3600 // Default: 3600 seconds (1 hour)
+	}
+	if !cfg.SOA.AutoOnMissing && cfg.AutoSOAOnMissing {
+		cfg.SOA.AutoOnMissing = true // backward compatibility for deprecated root field
 	}
 
 	// Auto-disable modifications on slave servers

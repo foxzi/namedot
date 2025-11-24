@@ -69,9 +69,9 @@ forwarder: "8.8.8.8"
 enable_dnssec: false
 api_token: "devtoken"
 rest_listen: ":8080"
-auto_soa_on_missing: true
 default_ttl: 300
 soa:
+  auto_on_missing: true
   primary: "ns1.{zone}"
   hostmaster: "hostmaster.{zone}"
 
@@ -340,8 +340,9 @@ VERSION=$VERSION nfpm pkg --packager rpm --config packaging/nfpm.yaml --target .
 ```
 
 Config Reference
-- `auto_soa_on_missing`: if true, при отсутствии SOA в зоне автоматически создаётся дефолтная запись SOA:
-  - MNAME: `ns1.<zone>.`, RNAME: `hostmaster.<zone>.`
+- `soa.auto_on_missing`: if true, при отсутствии SOA в зоне автоматически создаётся дефолтная запись SOA:
+  - MNAME: `soa.primary` (по умолчанию `ns1.<zone>.`)
+  - RNAME: `soa.hostmaster` (по умолчанию `hostmaster.<zone>.`)
   - SERIAL: текущий Unix timestamp
   - Refresh/Retry/Expire/Minimum: 7200/3600/1209600/300
   - TTL: 3600
@@ -468,8 +469,11 @@ forwarder: "8.8.8.8"
 enable_dnssec: false
 api_token: "devtoken"
 rest_listen: ":8080"
-auto_soa_on_missing: true
 default_ttl: 300
+soa:
+  auto_on_missing: true
+  primary: "ns1.{zone}"
+  hostmaster: "hostmaster.{zone}"
 
 db:
   driver: "sqlite"
@@ -736,8 +740,9 @@ VERSION=$VERSION nfpm pkg --packager rpm --config packaging/nfpm.yaml --target .
 ```
 
 ## Справка по конфигурации
-- `auto_soa_on_missing`: если true, при отсутствии SOA в зоне автоматически создаётся дефолтная запись SOA:
-  - MNAME: `ns1.<zone>.`, RNAME: `hostmaster.<zone>.`
+- `soa.auto_on_missing`: если true, при отсутствии SOA в зоне автоматически создаётся дефолтная запись SOA:
+  - MNAME: `soa.primary` (по умолчанию `ns1.<zone>.`)
+  - RNAME: `soa.hostmaster` (по умолчанию `hostmaster.<zone>.`)
   - SERIAL: текущий Unix timestamp
   - Refresh/Retry/Expire/Minimum: 7200/3600/1209600/300
   - TTL: 3600

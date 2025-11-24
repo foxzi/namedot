@@ -35,8 +35,8 @@ func TestConfigValidation(t *testing.T) {
 				RESTListen:       "127.0.0.1:8081",
 				EnableDNSSEC:     true,
 				APIToken:         "test-token-123",
-				AutoSOAOnMissing: true,
 				DefaultTTL:       300,
+				SOA:              SOAConfig{AutoOnMissing: true},
 				DB: DBConfig{
 					Driver: "postgres",
 					DSN:    "host=localhost dbname=namedot",

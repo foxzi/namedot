@@ -45,8 +45,8 @@ func TestEndToEnd_DNS_and_REST(t *testing.T) {
         EnableDNSSEC:     false,
         APIToken:         "devtoken",
         RESTListen:       restAddr,
-        AutoSOAOnMissing: true,
         DefaultTTL:       300,
+        SOA: config.SOAConfig{AutoOnMissing: true},
         DB: config.DBConfig{
             Driver: "sqlite",
             DSN:    fmt.Sprintf("file:%s?_foreign_keys=on", tmpDB),

@@ -20,11 +20,11 @@ import (
 func setupZoneIOTestServer(t *testing.T) (*Server, *gorm.DB, uint) {
 	t.Helper()
 
-	cfg := &config.Config{
-		APIToken:         "testtoken",
-		AutoSOAOnMissing: true,
-		DefaultTTL:       300,
-	}
+cfg := &config.Config{
+	APIToken:         "testtoken",
+	DefaultTTL:       300,
+	SOA:              config.SOAConfig{AutoOnMissing: true},
+}
 
 	gormDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

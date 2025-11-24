@@ -45,8 +45,8 @@ func TestGeoDNS_WithECS_USCountry(t *testing.T) {
         EnableDNSSEC:     false,
         APIToken:         "devtoken",
         RESTListen:       restAddr,
-        AutoSOAOnMissing: true,
         DefaultTTL:       60,
+        SOA:              config.SOAConfig{AutoOnMissing: true},
         DB: config.DBConfig{Driver: "sqlite", DSN: "file:" + tmpDB + "?_foreign_keys=on"},
         GeoIP: config.GeoIPConfig{Enabled: true, MMDBPath: geoDir, ReloadSec: 0, UseECS: true},
     }
@@ -151,7 +151,8 @@ func TestGeoDNS_WithECS_Country_Continent_ASN(t *testing.T) {
     tmpDB := filepath.Join(t.TempDir(), "geo_multi.db")
     cfg := &config.Config{
         Listen: dnsAddr, RESTListen: restAddr, APIToken: "devtoken",
-        AutoSOAOnMissing: true, DefaultTTL: 60,
+        DefaultTTL: 60,
+        SOA: config.SOAConfig{AutoOnMissing: true},
         DB: config.DBConfig{Driver: "sqlite", DSN: "file:" + tmpDB + "?_foreign_keys=on"},
         GeoIP: config.GeoIPConfig{Enabled: true, MMDBPath: geoDir, ReloadSec: 0, UseECS: true},
     }
