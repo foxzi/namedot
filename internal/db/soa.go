@@ -55,20 +55,31 @@ func BumpSOASerialAuto(db *gorm.DB, zone Zone, auto bool, primary, hostmaster st
 	if tx.Error != nil {
 		return
 	}
+	zname := strings.TrimSuffix(strings.ToLower(zone.Name), ".")
 	if soa.ID == 0 || len(soa.Records) == 0 {
 		if !auto {
 			return
 		}
-		zname := strings.TrimSuffix(strings.ToLower(zone.Name), ".")
 		origin := zname + "."
 		primary = resolveSOAName(primary, zname, "ns1.{zone}")
 		hostmaster = resolveSOAName(hostmaster, zname, "hostmaster.{zone}")
 		serial := strconv.FormatInt(time.Now().Unix(), 10)
 		// Defaults: refresh 7200, retry 3600, expire 1209600, minimum 300, TTL 3600
 		data := strings.Join([]string{primary, hostmaster, serial, "7200", "3600", "1209600", "300"}, " ")
-		rs := RRSet{ZoneID: zone.ID, Name: origin, Type: "SOA", TTL: 3600,
-			Records: []RData{{Data: data}}}
-		_ = db.Create(&rs).Error
+		if soa.ID == 0 {
+			rs := RRSet{ZoneID: zone.ID, Name: origin, Type: "SOA", TTL: 3600,
+				Records: []RData{{Data: data}}}
+			_ = db.Create(&rs).Error
+		} else {
+			// RRSet exists but has no records; populate it with defaults.
+			if soa.TTL == 0 {
+				soa.TTL = 3600
+			}
+			_ = db.Model(&RRSet{}).Where("id = ?", soa.ID).Update("ttl", soa.TTL).Error
+			_ = db.Unscoped().Where("rr_set_id = ?", soa.ID).Delete(&RData{}).Error
+			r := RData{RRSetID: soa.ID, Data: data}
+			_ = db.Create(&r).Error
+		}
 		return
 	}
 	// bump existing
@@ -76,7 +87,6 @@ func BumpSOASerialAuto(db *gorm.DB, zone Zone, auto bool, primary, hostmaster st
 	if len(parts) < 7 {
 		return
 	}
-	zname := strings.TrimSuffix(strings.ToLower(zone.Name), ".")
 	if primary != "" {
 		parts[0] = resolveSOAName(primary, zname, parts[0])
 	}
