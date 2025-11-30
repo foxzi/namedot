@@ -146,13 +146,13 @@ func TestCreateZone_DuplicateName(t *testing.T) {
 	cfg := &config.Config{APIToken: "testtoken"}
 	server, gormDB, _ := setupZoneTestServer(t, cfg)
 
-	// Create first zone
-	zone := db.Zone{Name: "duplicate.com"}
+	// Create first zone (with trailing dot - normalized form)
+	zone := db.Zone{Name: "duplicate.com."}
 	if err := gormDB.Create(&zone).Error; err != nil {
 		t.Fatalf("Failed to create initial zone: %v", err)
 	}
 
-	// Try to create duplicate
+	// Try to create duplicate (API will normalize to "duplicate.com.")
 	req := httptest.NewRequest("POST", "/zones", bytes.NewBufferString(`{"name":"duplicate.com"}`))
 	req.Header.Set("Authorization", "Bearer testtoken")
 	req.Header.Set("Content-Type", "application/json")

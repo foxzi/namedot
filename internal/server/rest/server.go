@@ -207,7 +207,12 @@ func (s *Server) createZone(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	z := dbm.Zone{Name: strings.ToLower(req.Name)}
+	// Normalize zone name: lowercase and ensure trailing dot (FQDN)
+	name := strings.ToLower(strings.TrimSpace(req.Name))
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+	z := dbm.Zone{Name: name}
 	if err := s.db.Create(&z).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
