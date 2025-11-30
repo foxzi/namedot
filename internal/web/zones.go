@@ -196,8 +196,9 @@ func (s *Server) createZone(c *gin.Context) {
         return
     }
 
-	// Normalize zone name
-	if name[len(name)-1] != '.' {
+	// Normalize zone name: lowercase and trailing dot
+	name = strings.ToLower(strings.TrimSpace(name))
+	if !strings.HasSuffix(name, ".") {
 		name += "."
 	}
 

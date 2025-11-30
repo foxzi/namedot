@@ -83,8 +83,9 @@ func TestSyncExport(t *testing.T) {
 				if len(zones) != 1 {
 					t.Fatalf("expected 1 zone, got %d", len(zones))
 				}
-				if zones[0].Name != "example.com" {
-					t.Errorf("expected zone name 'example.com', got '%s'", zones[0].Name)
+				// Export normalizes names with trailing dot
+				if zones[0].Name != "example.com." {
+					t.Errorf("expected zone name 'example.com.', got '%s'", zones[0].Name)
 				}
 				if len(zones[0].RRSets) != 1 {
 					t.Fatalf("expected 1 rrset, got %d", len(zones[0].RRSets))
@@ -271,8 +272,8 @@ func TestSyncImport(t *testing.T) {
 				if len(zones) != 1 {
 					t.Fatalf("expected 1 zone, got %d", len(zones))
 				}
-				if zones[0].Name != "new.com" {
-					t.Errorf("expected zone name 'new.com', got '%s'", zones[0].Name)
+				if zones[0].Name != "new.com." {
+					t.Errorf("expected zone name 'new.com.', got '%s'", zones[0].Name)
 				}
 				if len(zones[0].RRSets) != 1 {
 					t.Errorf("expected 1 rrset, got %d", len(zones[0].RRSets))
@@ -284,7 +285,7 @@ func TestSyncImport(t *testing.T) {
 		{
 			name: "import conflicting zone - replaces old records",
 			setupExisting: func(db *gorm.DB) {
-				zone := dbm.Zone{Name: "existing.com"}
+				zone := dbm.Zone{Name: "existing.com."}
 				db.Create(&zone)
 
 				rrset := dbm.RRSet{
@@ -453,7 +454,7 @@ func TestSyncImport(t *testing.T) {
 			name: "import multiple zones and templates",
 			setupExisting: func(db *gorm.DB) {
 				// Create existing zone to test conflict
-				zone := dbm.Zone{Name: "conflict.com"}
+				zone := dbm.Zone{Name: "conflict.com."}
 				db.Create(&zone)
 
 				// Create existing template to test update

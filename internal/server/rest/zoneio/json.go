@@ -8,6 +8,15 @@ import (
     dbm "namedot/internal/db"
 )
 
+// NormalizeFQDN ensures name is lowercase and ends with a dot
+func NormalizeFQDN(name string) string {
+    n := strings.ToLower(strings.TrimSpace(name))
+    if n != "" && !strings.HasSuffix(n, ".") {
+        n += "."
+    }
+    return n
+}
+
 // ImportJSON imports RRsets from src into dst zone.
 // mode: upsert | replace
 func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultTTL uint32) error {
@@ -29,7 +38,7 @@ func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultT
         for _, rs := range src.RRSets {
             rs.ID = 0                     // ignore incoming rrset ID
             rs.ZoneID = dst.ID
-            rs.Name = strings.ToLower(rs.Name)
+            rs.Name = NormalizeFQDN(rs.Name)
             rs.Type = strings.ToUpper(rs.Type)
             if rs.TTL == 0 && defaultTTL > 0 {
                 rs.TTL = defaultTTL

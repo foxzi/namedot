@@ -569,6 +569,14 @@ func (s *Server) syncExport(c *gin.Context) {
 		return
 	}
 
+	// Normalize zone and rrset names before export
+	for i := range zones {
+		zones[i].Name = zoneio.NormalizeFQDN(zones[i].Name)
+		for j := range zones[i].RRSets {
+			zones[i].RRSets[j].Name = zoneio.NormalizeFQDN(zones[i].RRSets[j].Name)
+		}
+	}
+
 	var templates []dbm.Template
 	if err := s.db.Preload("Records").Find(&templates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -592,13 +600,16 @@ func (s *Server) syncImport(c *gin.Context) {
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// Import zones
 		for _, zone := range data.Zones {
+			// Normalize zone name
+			zoneName := zoneio.NormalizeFQDN(zone.Name)
+
 			var existingZone dbm.Zone
-			err := tx.Where("name = ?", zone.Name).First(&existingZone).Error
+			err := tx.Where("name = ?", zoneName).First(&existingZone).Error
 
 			if err == gorm.ErrRecordNotFound {
 				// Create new zone
 				newZone := dbm.Zone{
-					Name: zone.Name,
+					Name: zoneName,
 				}
 				if err := tx.Create(&newZone).Error; err != nil {
 					return fmt.Errorf("create zone %s: %w", zone.Name, err)
@@ -629,8 +640,8 @@ func (s *Server) syncImport(c *gin.Context) {
 			for _, rrset := range zone.RRSets {
 				newRRSet := dbm.RRSet{
 					ZoneID:  existingZone.ID,
-					Name:    rrset.Name,
-					Type:    rrset.Type,
+					Name:    zoneio.NormalizeFQDN(rrset.Name),
+					Type:    strings.ToUpper(rrset.Type),
 					TTL:     rrset.TTL,
 					Records: rrset.Records,
 				}

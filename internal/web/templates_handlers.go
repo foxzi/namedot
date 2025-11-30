@@ -683,7 +683,8 @@ func (s *Server) applyTemplate(c *gin.Context) {
 		name := strings.ReplaceAll(tplRec.Name, "{domain}", domain)
 		data := strings.ReplaceAll(tplRec.Data, "{domain}", domain)
 
-		// Ensure name ends with dot
+		// Normalize name: lowercase and trailing dot
+		name = strings.ToLower(strings.TrimSpace(name))
 		if !strings.HasSuffix(name, ".") {
 			name += "."
 		}

@@ -4,9 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"gorm.io/gorm"
 )
+
+// normalizeFQDN ensures name is lowercase and ends with a dot
+func normalizeFQDN(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n != "" && !strings.HasSuffix(n, ".") {
+		n += "."
+	}
+	return n
+}
 
 // BackupData represents the complete backup structure
 type BackupData struct {
@@ -67,12 +77,15 @@ func ImportZones(db *gorm.DB, filename string, mode string) error {
 
 		// Import zones
 		for _, zone := range backup.Zones {
+			// Normalize zone name
+			zoneName := normalizeFQDN(zone.Name)
+
 			var existingZone Zone
-			err := tx.Where("name = ?", zone.Name).First(&existingZone).Error
+			err := tx.Where("name = ?", zoneName).First(&existingZone).Error
 
 			if err == gorm.ErrRecordNotFound {
 				// Create new zone
-				newZone := Zone{Name: zone.Name}
+				newZone := Zone{Name: zoneName}
 				if err := tx.Create(&newZone).Error; err != nil {
 					return fmt.Errorf("failed to create zone %s: %w", zone.Name, err)
 				}
@@ -101,8 +114,8 @@ func ImportZones(db *gorm.DB, filename string, mode string) error {
 			for _, rrset := range zone.RRSets {
 				newRRSet := RRSet{
 					ZoneID:  existingZone.ID,
-					Name:    rrset.Name,
-					Type:    rrset.Type,
+					Name:    normalizeFQDN(rrset.Name),
+					Type:    strings.ToUpper(rrset.Type),
 					TTL:     rrset.TTL,
 					Records: rrset.Records,
 				}
