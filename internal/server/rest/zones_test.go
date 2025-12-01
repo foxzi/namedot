@@ -237,6 +237,127 @@ func TestListZones(t *testing.T) {
 	}
 }
 
+func TestGetZoneByName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		queryName      string
+		setupZones     []string
+		expectedStatus int
+		expectedName   string
+		description    string
+	}{
+		{
+			name:           "exact match",
+			queryName:      "test.com",
+			setupZones:     []string{"test.com."},
+			expectedStatus: http.StatusOK,
+			expectedName:   "test.com.",
+			description:    "Should find zone by exact name",
+		},
+		{
+			name:           "match without trailing dot",
+			queryName:      "example.org",
+			setupZones:     []string{"example.org."},
+			expectedStatus: http.StatusOK,
+			expectedName:   "example.org.",
+			description:    "Should normalize name and find zone",
+		},
+		{
+			name:           "case insensitive match",
+			queryName:      "EXAMPLE.COM",
+			setupZones:     []string{"example.com."},
+			expectedStatus: http.StatusOK,
+			expectedName:   "example.com.",
+			description:    "Should match case-insensitively",
+		},
+		{
+			name:           "zone not found",
+			queryName:      "notfound.com",
+			setupZones:     []string{"other.com."},
+			expectedStatus: http.StatusNotFound,
+			description:    "Should return 404 for non-existent zone",
+		},
+		{
+			name:           "with rrsets preloaded",
+			queryName:      "withrecords.com",
+			setupZones:     []string{"withrecords.com."},
+			expectedStatus: http.StatusOK,
+			expectedName:   "withrecords.com.",
+			description:    "Should return zone with RRSets",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{APIToken: "testtoken"}
+			server, gormDB, _ := setupZoneTestServer(t, cfg)
+
+			// Create zones
+			for _, zoneName := range tt.setupZones {
+				zone := db.Zone{Name: zoneName}
+				if err := gormDB.Create(&zone).Error; err != nil {
+					t.Fatalf("Failed to create zone %s: %v", zoneName, err)
+				}
+
+				// Add RRSet for "withrecords" test
+				if zoneName == "withrecords.com." {
+					rrset := db.RRSet{
+						ZoneID: zone.ID,
+						Name:   "www.withrecords.com.",
+						Type:   "A",
+						TTL:    300,
+						Records: []db.RData{
+							{Data: "192.0.2.1"},
+						},
+					}
+					if err := gormDB.Create(&rrset).Error; err != nil {
+						t.Fatalf("Failed to create rrset: %v", err)
+					}
+				}
+			}
+
+			req := httptest.NewRequest("GET", "/zones?name="+tt.queryName, nil)
+			req.Header.Set("Authorization", "Bearer testtoken")
+			w := httptest.NewRecorder()
+
+			server.r.ServeHTTP(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("%s\nExpected status %d, got %d\nBody: %s",
+					tt.description, tt.expectedStatus, w.Code, w.Body.String())
+			}
+
+			if tt.expectedStatus == http.StatusOK {
+				var zone db.Zone
+				if err := json.Unmarshal(w.Body.Bytes(), &zone); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+
+				if zone.Name != tt.expectedName {
+					t.Errorf("Expected zone name %s, got %s", tt.expectedName, zone.Name)
+				}
+
+				// Check RRSets are preloaded for withrecords test
+				if tt.queryName == "withrecords.com" && len(zone.RRSets) == 0 {
+					t.Error("Expected RRSets to be preloaded")
+				}
+			}
+
+			if tt.expectedStatus == http.StatusNotFound {
+				var response map[string]interface{}
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatalf("Failed to parse response: %v", err)
+				}
+				if response["error"] != "zone not found" {
+					t.Errorf("Expected error 'zone not found', got %v", response["error"])
+				}
+			}
+		})
+	}
+}
+
 func TestGetZone(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

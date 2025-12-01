@@ -138,6 +138,12 @@ Examples (curl)
 - List zones
   - `curl -sS -H 'Authorization: Bearer devtoken' http://127.0.0.1:8080/zones`
 
+- Get zone by name (returns single zone with RRSets or 404)
+  - `curl -sS -H 'Authorization: Bearer devtoken' 'http://127.0.0.1:8080/zones?name=example.com'`
+  - Name is normalized: `EXAMPLE.COM` → `example.com.`, trailing dot is added automatically
+  - Get zone ID by name (requires jq):
+    - `ZID=$(curl -sS -H 'Authorization: Bearer devtoken' 'http://127.0.0.1:8080/zones?name=example.com' | jq -r .id)`
+
 - Add A rrset (www)
   - `curl -sS -X POST -H 'Authorization: Bearer devtoken' -H 'Content-Type: application/json' \
      -d '{"name":"www","type":"A","ttl":300,"records":[{"data":"192.0.2.10"},{"data":"192.0.2.11"}]}' \
@@ -537,6 +543,12 @@ CLI флаги
 
 - Список зон
   - `curl -sS -H 'Authorization: Bearer devtoken' http://127.0.0.1:8080/zones`
+
+- Получить зону по имени (возвращает одну зону с RRSets или 404)
+  - `curl -sS -H 'Authorization: Bearer devtoken' 'http://127.0.0.1:8080/zones?name=example.com'`
+  - Имя нормализуется: `EXAMPLE.COM` → `example.com.`, точка в конце добавляется автоматически
+  - Получить ID зоны по имени (требуется jq):
+    - `ZID=$(curl -sS -H 'Authorization: Bearer devtoken' 'http://127.0.0.1:8080/zones?name=example.com' | jq -r .id)`
 
 - Добавить A rrset (www)
   - `curl -sS -X POST -H 'Authorization: Bearer devtoken' -H 'Content-Type: application/json' \

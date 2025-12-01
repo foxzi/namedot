@@ -227,6 +227,24 @@ func (s *Server) createZone(c *gin.Context) {
 }
 
 func (s *Server) listZones(c *gin.Context) {
+	// Check for name query parameter for exact search
+	if name := c.Query("name"); name != "" {
+		// Normalize zone name: lowercase and ensure trailing dot (FQDN)
+		name = strings.ToLower(strings.TrimSpace(name))
+		if !strings.HasSuffix(name, ".") {
+			name += "."
+		}
+
+		var z dbm.Zone
+		if err := s.db.Preload("RRSets.Records").Where("name = ?", name).First(&z).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
+			return
+		}
+		c.JSON(http.StatusOK, z)
+		return
+	}
+
+	// Default: return all zones
 	var zs []dbm.Zone
 	if err := s.db.Find(&zs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

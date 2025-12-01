@@ -136,16 +136,25 @@ paths:
               schema: { $ref: '#/components/schemas/Health' }
   /zones:
     get:
-      summary: List zones
+      summary: List zones or get zone by name
+      parameters:
+        - in: query
+          name: name
+          required: false
+          schema: { type: string }
+          description: Zone name for exact search. Returns single zone object with RRSets or 404.
       responses:
         '200':
-          description: OK
+          description: OK. Returns array of zones (no name param) or single zone object (with name param)
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Zone' }
+                oneOf:
+                  - type: array
+                    items: { $ref: '#/components/schemas/Zone' }
+                  - $ref: '#/components/schemas/Zone'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
       summary: Create zone
       requestBody:
