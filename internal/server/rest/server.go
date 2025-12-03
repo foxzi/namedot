@@ -658,7 +658,7 @@ func (s *Server) syncImport(c *gin.Context) {
 			for _, rrset := range zone.RRSets {
 				newRRSet := dbm.RRSet{
 					ZoneID:  existingZone.ID,
-					Name:    zoneio.NormalizeFQDN(rrset.Name),
+					Name:    zoneio.NormalizeRRSetName(rrset.Name, zoneName),
 					Type:    strings.ToUpper(rrset.Type),
 					TTL:     rrset.TTL,
 					Records: rrset.Records,

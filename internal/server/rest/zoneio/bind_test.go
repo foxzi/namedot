@@ -122,3 +122,58 @@ func TestImportJSON_Replace_RemovesMissingRRSet(t *testing.T) {
         t.Fatalf("expected only A rrset, got %s", sets[0].Type)
     }
 }
+
+func TestNormalizeRRSetName(t *testing.T) {
+    tests := []struct {
+        name     string
+        zoneName string
+        want     string
+    }{
+        {"@", "example.com.", "example.com."},
+        {"@", "example.com", "example.com."},
+        {"", "example.com.", "example.com."},
+        {"www", "example.com.", "www.example.com."},
+        {"www.example.com.", "example.com.", "www.example.com."},
+        {"sub.@", "example.com.", "sub.example.com."},
+        {"WWW", "EXAMPLE.COM.", "www.example.com."},
+    }
+    for _, tt := range tests {
+        got := NormalizeRRSetName(tt.name, tt.zoneName)
+        if got != tt.want {
+            t.Errorf("NormalizeRRSetName(%q, %q) = %q, want %q", tt.name, tt.zoneName, got, tt.want)
+        }
+    }
+}
+
+func TestImportJSON_AtSymbol(t *testing.T) {
+    db := newTestDB(t)
+    z := dbm.Zone{Name: "test.com."}
+    if err := db.Create(&z).Error; err != nil {
+        t.Fatalf("create zone: %v", err)
+    }
+
+    src := dbm.Zone{RRSets: []dbm.RRSet{
+        {Name: "@", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "192.0.2.1"}}},
+        {Name: "www", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "192.0.2.2"}}},
+    }}
+    if err := ImportJSON(db, &z, &src, "replace", 0); err != nil {
+        t.Fatalf("import json: %v", err)
+    }
+
+    var sets []dbm.RRSet
+    if err := db.Where("zone_id = ?", z.ID).Order("name").Find(&sets).Error; err != nil {
+        t.Fatalf("load rrsets: %v", err)
+    }
+    if len(sets) != 2 {
+        t.Fatalf("expected 2 rrsets, got %d", len(sets))
+    }
+
+    // @ should become test.com.
+    if sets[0].Name != "test.com." {
+        t.Errorf("expected @ to expand to 'test.com.', got %q", sets[0].Name)
+    }
+    // www should become www.test.com.
+    if sets[1].Name != "www.test.com." {
+        t.Errorf("expected www to expand to 'www.test.com.', got %q", sets[1].Name)
+    }
+}

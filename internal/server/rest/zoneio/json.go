@@ -17,6 +17,30 @@ func NormalizeFQDN(name string) string {
     return n
 }
 
+// NormalizeRRSetName normalizes record name, expanding @ to zone apex
+func NormalizeRRSetName(name, zoneName string) string {
+    n := strings.ToLower(strings.TrimSpace(name))
+    zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zoneName)), ".")
+
+    // Handle @ as zone apex
+    if n == "" || n == "@" {
+        return zone + "."
+    }
+
+    // Handle trailing .@ (relative to zone apex)
+    if strings.HasSuffix(n, ".@") {
+        n = strings.TrimSuffix(n, ".@")
+    }
+
+    // Already FQDN
+    if strings.HasSuffix(n, ".") {
+        return n
+    }
+
+    // Relative name - append zone
+    return n + "." + zone + "."
+}
+
 // ImportJSON imports RRsets from src into dst zone.
 // mode: upsert | replace
 func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultTTL uint32) error {
@@ -38,7 +62,7 @@ func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultT
         for _, rs := range src.RRSets {
             rs.ID = 0                     // ignore incoming rrset ID
             rs.ZoneID = dst.ID
-            rs.Name = NormalizeFQDN(rs.Name)
+            rs.Name = NormalizeRRSetName(rs.Name, dst.Name)
             rs.Type = strings.ToUpper(rs.Type)
             if rs.TTL == 0 && defaultTTL > 0 {
                 rs.TTL = defaultTTL
