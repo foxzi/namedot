@@ -1,13 +1,15 @@
 package web
 
 import (
-    "fmt"
-    "net/http"
-    "net/url"
-    "strconv"
-    "strings"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
 	"namedot/internal/db"
 )
 
@@ -214,17 +216,42 @@ func (s *Server) createZone(c *gin.Context) {
 
 func (s *Server) deleteZone(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-    if err != nil {
-        c.Status(http.StatusBadRequest)
-        return
-    }
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
 
-    if err := s.db.Delete(&db.Zone{}, id).Error; err != nil {
-        c.String(http.StatusInternalServerError, s.tr(c, "Error deleting zone"))
-        return
-    }
+	var zone db.Zone
+	if err := s.db.First(&zone, id).Error; err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
 
-    c.Status(http.StatusOK)
+	// Delete zone with all related records in transaction
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		// Get all RRSet IDs for this zone
+		var rrsetIDs []uint
+		if err := tx.Model(&db.RRSet{}).Where("zone_id = ?", zone.ID).Pluck("id", &rrsetIDs).Error; err != nil {
+			return err
+		}
+		// Delete all RData for these RRSets
+		if len(rrsetIDs) > 0 {
+			if err := tx.Where("rr_set_id IN ?", rrsetIDs).Delete(&db.RData{}).Error; err != nil {
+				return err
+			}
+		}
+		// Delete all RRSets
+		if err := tx.Where("zone_id = ?", zone.ID).Delete(&db.RRSet{}).Error; err != nil {
+			return err
+		}
+		// Delete the zone
+		return tx.Delete(&zone).Error
+	}); err != nil {
+		c.String(http.StatusInternalServerError, s.tr(c, "Error deleting zone"))
+		return
+	}
+
+	c.Status(http.StatusOK)
 }
 
 func (s *Server) editZoneForm(c *gin.Context) {

@@ -269,9 +269,22 @@ func (s *Server) deleteZone(c *gin.Context) {
 		return
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		// Get all RRSet IDs for this zone
+		var rrsetIDs []uint
+		if err := tx.Model(&dbm.RRSet{}).Where("zone_id = ?", z.ID).Pluck("id", &rrsetIDs).Error; err != nil {
+			return err
+		}
+		// Delete all RData for these RRSets
+		if len(rrsetIDs) > 0 {
+			if err := tx.Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
+				return err
+			}
+		}
+		// Delete all RRSets
 		if err := tx.Where("zone_id = ?", z.ID).Delete(&dbm.RRSet{}).Error; err != nil {
 			return err
 		}
+		// Delete the zone
 		if err := tx.Delete(&z).Error; err != nil {
 			return err
 		}
