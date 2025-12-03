@@ -27,11 +27,11 @@ func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultT
                 return err
             }
             if len(rrsetIDs) > 0 {
-                if err := tx.Unscoped().Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
+                if err := tx.Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
                     return err
                 }
             }
-            if err := tx.Unscoped().Where("zone_id = ?", dst.ID).Delete(&dbm.RRSet{}).Error; err != nil {
+            if err := tx.Where("zone_id = ?", dst.ID).Delete(&dbm.RRSet{}).Error; err != nil {
                 return err
             }
         }
@@ -53,7 +53,7 @@ func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultT
             var existing dbm.RRSet
             if err := tx.Where("zone_id = ? AND name = ? AND type = ?", dst.ID, rs.Name, rs.Type).First(&existing).Error; err == nil {
                 // replace records
-                if err := tx.Unscoped().Where("rr_set_id = ?", existing.ID).Delete(&dbm.RData{}).Error; err != nil {
+                if err := tx.Where("rr_set_id = ?", existing.ID).Delete(&dbm.RData{}).Error; err != nil {
                     return err
                 }
                 existing.TTL = rs.TTL

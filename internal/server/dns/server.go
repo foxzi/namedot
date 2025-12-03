@@ -200,8 +200,7 @@ func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answer
     zones := s.zoneCache.Get()
     if zones == nil {
         // Cache miss or expired, fetch from database
-        // Important: filter deleted_at IS NULL to exclude soft-deleted zones from cache
-        if err := s.db.Where("deleted_at IS NULL").Order("length(name) desc").Find(&zones).Error; err != nil {
+        if err := s.db.Order("length(name) desc").Find(&zones).Error; err != nil {
             return nil, 0, err
         }
         // Store in cache for future use

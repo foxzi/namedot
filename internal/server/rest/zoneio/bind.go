@@ -64,11 +64,11 @@ func ImportBIND(db *gorm.DB, zone *dbm.Zone, r io.Reader, mode string, defaultTT
                 return err
             }
             if len(rrsetIDs) > 0 {
-                if err := tx.Unscoped().Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
+                if err := tx.Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
                     return err
                 }
             }
-            if err := tx.Unscoped().Where("zone_id = ?", zone.ID).Delete(&dbm.RRSet{}).Error; err != nil {
+            if err := tx.Where("zone_id = ?", zone.ID).Delete(&dbm.RRSet{}).Error; err != nil {
                 return err
             }
         }
@@ -76,7 +76,7 @@ func ImportBIND(db *gorm.DB, zone *dbm.Zone, r io.Reader, mode string, defaultTT
             var existing dbm.RRSet
             _ = tx.Where("zone_id = ? AND name = ? AND type = ?", zone.ID, rs.Name, rs.Type).Limit(1).Find(&existing).Error
             if existing.ID != 0 {
-                if err := tx.Unscoped().Where("rr_set_id = ?", existing.ID).Delete(&dbm.RData{}).Error; err != nil {
+                if err := tx.Where("rr_set_id = ?", existing.ID).Delete(&dbm.RData{}).Error; err != nil {
                     return err
                 }
                 existing.TTL = rs.TTL

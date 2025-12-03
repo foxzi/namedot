@@ -556,7 +556,7 @@ func stripTimestamps(v any) any {
 		out := make(map[string]any, len(t))
 		for k, val := range t {
 			lk := strings.ToLower(k)
-			if lk == "created_at" || lk == "updated_at" || lk == "deleted_at" {
+			if lk == "created_at" || lk == "updated_at" {
 				continue
 			}
 			out[k] = stripTimestamps(val)
@@ -637,7 +637,7 @@ func (s *Server) syncImport(c *gin.Context) {
 				return fmt.Errorf("check zone %s: %w", zone.Name, err)
 			}
 
-			// Delete old rrsets and their records for this zone (hard delete, not soft delete)
+			// Delete old rrsets and their records for this zone
 			// First, get all rrset IDs for this zone
 			var rrsetIDs []uint
 			if err := tx.Model(&dbm.RRSet{}).Where("zone_id = ?", existingZone.ID).Pluck("id", &rrsetIDs).Error; err != nil {
@@ -645,12 +645,12 @@ func (s *Server) syncImport(c *gin.Context) {
 			}
 			// Delete all r_data records associated with these rrsets
 			if len(rrsetIDs) > 0 {
-				if err := tx.Unscoped().Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
+				if err := tx.Where("rr_set_id IN ?", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
 					return fmt.Errorf("delete old records for zone %s: %w", zone.Name, err)
 				}
 			}
 			// Now delete the rrsets themselves
-			if err := tx.Unscoped().Where("zone_id = ?", existingZone.ID).Delete(&dbm.RRSet{}).Error; err != nil {
+			if err := tx.Where("zone_id = ?", existingZone.ID).Delete(&dbm.RRSet{}).Error; err != nil {
 				return fmt.Errorf("delete old rrsets for zone %s: %w", zone.Name, err)
 			}
 
@@ -698,8 +698,8 @@ func (s *Server) syncImport(c *gin.Context) {
 				}
 			}
 
-			// Delete old template records (hard delete, not soft delete)
-			if err := tx.Unscoped().Where("template_id = ?", existingTmpl.ID).Delete(&dbm.TemplateRecord{}).Error; err != nil {
+			// Delete old template records
+			if err := tx.Where("template_id = ?", existingTmpl.ID).Delete(&dbm.TemplateRecord{}).Error; err != nil {
 				return fmt.Errorf("delete old records for template %s: %w", tmpl.Name, err)
 			}
 

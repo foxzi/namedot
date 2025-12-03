@@ -346,11 +346,11 @@ func TestSyncImport(t *testing.T) {
 					t.Errorf("expected TTL 600, got %d", zones[0].RRSets[0].TTL)
 				}
 
-				// Verify old records are hard deleted (not soft deleted)
+				// Verify old records are deleted
 				var oldRecords []dbm.RData
-				db.Unscoped().Where("data = ?", "10.0.0.1").Find(&oldRecords)
+				db.Where("data = ?", "10.0.0.1").Find(&oldRecords)
 				if len(oldRecords) != 0 {
-					t.Errorf("expected old records to be hard deleted, found %d", len(oldRecords))
+					t.Errorf("expected old records to be deleted, found %d", len(oldRecords))
 				}
 			},
 			wantStatus:  http.StatusOK,
@@ -440,11 +440,11 @@ func TestSyncImport(t *testing.T) {
 						len(templates[0].Records))
 				}
 
-				// Verify old records are hard deleted
+				// Verify old records are deleted
 				var oldRecords []dbm.TemplateRecord
-				db.Unscoped().Where("data = ?", "10.0.0.1").Find(&oldRecords)
+				db.Where("data = ?", "10.0.0.1").Find(&oldRecords)
 				if len(oldRecords) != 0 {
-					t.Errorf("expected old records to be hard deleted, found %d", len(oldRecords))
+					t.Errorf("expected old records to be deleted, found %d", len(oldRecords))
 				}
 			},
 			wantStatus:  http.StatusOK,

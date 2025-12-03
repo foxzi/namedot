@@ -76,7 +76,7 @@ func BumpSOASerialAuto(db *gorm.DB, zone Zone, auto bool, primary, hostmaster st
 				soa.TTL = 3600
 			}
 			_ = db.Model(&RRSet{}).Where("id = ?", soa.ID).Update("ttl", soa.TTL).Error
-			_ = db.Unscoped().Where("rr_set_id = ?", soa.ID).Delete(&RData{}).Error
+			_ = db.Where("rr_set_id = ?", soa.ID).Delete(&RData{}).Error
 			r := RData{RRSetID: soa.ID, Data: data}
 			_ = db.Create(&r).Error
 		}
