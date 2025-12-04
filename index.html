@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>namedot Package Repository</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        h1 { color: #333; }
+        pre { background: #f4f4f4; padding: 15px; border-radius: 5px; }
+        .section { margin: 30px 0; }
+    </style>
+</head>
+<body>
+    <h1>namedot Package Repository</h1>
+
+    <div class="section">
+        <h2>Debian/Ubuntu (APT)</h2>
+        <pre>
+# Add repository
+echo "deb [trusted=yes] https://foxzi.github.io/namedot/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/namedot.list
+
+# Update and install
+sudo apt-get update
+sudo apt-get install namedot
+        </pre>
+    </div>
+
+    <div class="section">
+        <h2>RHEL/CentOS/Fedora (YUM/DNF)</h2>
+        <pre>
+# Add repository
+sudo curl -o /etc/yum.repos.d/namedot.repo https://foxzi.github.io/namedot/yum-repo/namedot/namedot.repo
+
+# Install
+sudo yum install namedot
+# or
+sudo dnf install namedot
+        </pre>
+    </div>
+
+    <div class="section">
+        <h2>Manual Download</h2>
+        <p>Visit <a href="https://github.com/foxzi/namedot/releases">Releases</a> to download packages manually.</p>
+    </div>
+</body>
+</html>
