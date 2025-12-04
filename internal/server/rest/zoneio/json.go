@@ -1,6 +1,7 @@
 package zoneio
 
 import (
+    "fmt"
     "strings"
 
     "gorm.io/gorm"
@@ -17,14 +18,16 @@ func NormalizeFQDN(name string) string {
     return n
 }
 
-// NormalizeRRSetName normalizes record name, expanding @ to zone apex
-func NormalizeRRSetName(name, zoneName string) string {
+// NormalizeRRSetName normalizes record name, expanding @ to zone apex.
+// Returns error if the resulting name does not belong to the zone.
+func NormalizeRRSetName(name, zoneName string) (string, error) {
     n := strings.ToLower(strings.TrimSpace(name))
     zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zoneName)), ".")
+    zoneFQDN := zone + "."
 
     // Handle @ as zone apex
     if n == "" || n == "@" {
-        return zone + "."
+        return zoneFQDN, nil
     }
 
     // Handle trailing .@ (relative to zone apex)
@@ -32,13 +35,28 @@ func NormalizeRRSetName(name, zoneName string) string {
         n = strings.TrimSuffix(n, ".@")
     }
 
-    // Already FQDN
+    var result string
+
+    // Already FQDN (ends with dot)
     if strings.HasSuffix(n, ".") {
-        return n
+        result = n
+    } else if n == zone {
+        // Name equals zone name (FQDN without dot) - treat as apex
+        result = zoneFQDN
+    } else if strings.HasSuffix(n, "."+zone) {
+        // Name ends with zone (FQDN without trailing dot)
+        result = n + "."
+    } else {
+        // Relative name - append zone
+        result = n + "." + zoneFQDN
     }
 
-    // Relative name - append zone
-    return n + "." + zone + "."
+    // Validate: result must be zone apex or subdomain of zone
+    if result != zoneFQDN && !strings.HasSuffix(result, "."+zoneFQDN) {
+        return "", fmt.Errorf("record name %q does not belong to zone %q", name, zoneName)
+    }
+
+    return result, nil
 }
 
 // ImportJSON imports RRsets from src into dst zone.
@@ -62,7 +80,11 @@ func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultT
         for _, rs := range src.RRSets {
             rs.ID = 0                     // ignore incoming rrset ID
             rs.ZoneID = dst.ID
-            rs.Name = NormalizeRRSetName(rs.Name, dst.Name)
+            normalizedName, err := NormalizeRRSetName(rs.Name, dst.Name)
+            if err != nil {
+                return err
+            }
+            rs.Name = normalizedName
             rs.Type = strings.ToUpper(rs.Type)
             if rs.TTL == 0 && defaultTTL > 0 {
                 rs.TTL = defaultTTL

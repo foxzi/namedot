@@ -255,10 +255,10 @@ func TestImportZone_JSON(t *testing.T) {
 			mode: "upsert",
 			existingData: false,
 			importPayload: `{
-				"name":"import.test",
+				"name":"export.test",
 				"rrsets":[
 					{
-						"name":"www.import.test.",
+						"name":"www",
 						"type":"A",
 						"ttl":300,
 						"records":[{"data":"192.0.2.1"}]
@@ -282,10 +282,10 @@ func TestImportZone_JSON(t *testing.T) {
 			mode: "upsert",
 			existingData: true,
 			importPayload: `{
-				"name":"import.test",
+				"name":"export.test",
 				"rrsets":[
 					{
-						"name":"new.import.test.",
+						"name":"new",
 						"type":"A",
 						"ttl":300,
 						"records":[{"data":"192.0.2.2"}]
@@ -301,7 +301,7 @@ func TestImportZone_JSON(t *testing.T) {
 				// Should have the new record
 				found := false
 				for _, rr := range rrsets {
-					if rr.Name == "new.import.test." {
+					if rr.Name == "new.export.test." {
 						found = true
 						break
 					}
@@ -317,10 +317,10 @@ func TestImportZone_JSON(t *testing.T) {
 			mode: "upsert",
 			existingData: false,
 			importPayload: `{
-				"name":"import.test",
+				"name":"export.test",
 				"rrsets":[
 					{
-						"name":"geo.import.test.",
+						"name":"geo",
 						"type":"A",
 						"ttl":300,
 						"records":[
@@ -333,7 +333,7 @@ func TestImportZone_JSON(t *testing.T) {
 			expectedStatus: http.StatusNoContent,
 			validateResult: func(t *testing.T, db *gorm.DB, zoneID uint) {
 				var rrsets []RRSet
-				if err := db.Preload("Records").Where("zone_id = ? AND name = ?", zoneID, "geo.import.test.").Find(&rrsets).Error; err != nil {
+				if err := db.Preload("Records").Where("zone_id = ? AND name = ?", zoneID, "geo.export.test.").Find(&rrsets).Error; err != nil {
 					t.Fatalf("Failed to load rrsets: %v", err)
 				}
 				if len(rrsets) == 0 {
@@ -362,7 +362,7 @@ func TestImportZone_JSON(t *testing.T) {
 			if tt.existingData {
 				rrset := RRSet{
 					ZoneID: zoneID,
-					Name:   "old.import.test.",
+					Name:   "old.export.test.",
 					Type:   "A",
 					TTL:    300,
 					Records: []RData{

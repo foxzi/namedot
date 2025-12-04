@@ -61,12 +61,12 @@ func TestImportJSON_DefaultTTL(t *testing.T) {
     z := dbm.Zone{Name: "example2.com"}
     if err := db.Create(&z).Error; err != nil { t.Fatalf("create zone: %v", err) }
 
-    src := dbm.Zone{RRSets: []dbm.RRSet{{Name: "www.example.com.", Type: "A", TTL: 0, Records: []dbm.RData{{Data: "192.0.2.5"}}}}}
+    src := dbm.Zone{RRSets: []dbm.RRSet{{Name: "www", Type: "A", TTL: 0, Records: []dbm.RData{{Data: "192.0.2.5"}}}}}
     if err := ImportJSON(db, &z, &src, "replace", 1234); err != nil {
         t.Fatalf("import json: %v", err)
     }
     var set dbm.RRSet
-    if err := db.Where("zone_id = ? AND name = ? AND type = ?", z.ID, "www.example.com.", "A").First(&set).Error; err != nil {
+    if err := db.Where("zone_id = ? AND name = ? AND type = ?", z.ID, "www.example2.com.", "A").First(&set).Error; err != nil {
         t.Fatalf("load set: %v", err)
     }
     if set.TTL != 1234 { t.Fatalf("expected ttl 1234, got %d", set.TTL) }
@@ -77,12 +77,12 @@ func TestImportJSON_NoDefaultTTL_KeepsZeroTTL(t *testing.T) {
     z := dbm.Zone{Name: "example3.com"}
     if err := db.Create(&z).Error; err != nil { t.Fatalf("create zone: %v", err) }
 
-    src := dbm.Zone{RRSets: []dbm.RRSet{{Name: "api.example.com.", Type: "A", TTL: 0, Records: []dbm.RData{{Data: "192.0.2.6"}}}}}
+    src := dbm.Zone{RRSets: []dbm.RRSet{{Name: "api", Type: "A", TTL: 0, Records: []dbm.RData{{Data: "192.0.2.6"}}}}}
     if err := ImportJSON(db, &z, &src, "replace", 0); err != nil {
         t.Fatalf("import json: %v", err)
     }
     var set dbm.RRSet
-    if err := db.Where("zone_id = ? AND name = ? AND type = ?", z.ID, "api.example.com.", "A").First(&set).Error; err != nil {
+    if err := db.Where("zone_id = ? AND name = ? AND type = ?", z.ID, "api.example3.com.", "A").First(&set).Error; err != nil {
         t.Fatalf("load set: %v", err)
     }
     if set.TTL != 0 { t.Fatalf("expected ttl 0 to be preserved, got %d", set.TTL) }
@@ -136,11 +136,36 @@ func TestNormalizeRRSetName(t *testing.T) {
         {"www.example.com.", "example.com.", "www.example.com."},
         {"sub.@", "example.com.", "sub.example.com."},
         {"WWW", "EXAMPLE.COM.", "www.example.com."},
+        // FQDN without trailing dot - should not duplicate zone name
+        {"example.com", "example.com.", "example.com."},
+        {"www.example.com", "example.com.", "www.example.com."},
+        {"sub.www.example.com", "example.com.", "sub.www.example.com."},
     }
     for _, tt := range tests {
-        got := NormalizeRRSetName(tt.name, tt.zoneName)
+        got, err := NormalizeRRSetName(tt.name, tt.zoneName)
+        if err != nil {
+            t.Errorf("NormalizeRRSetName(%q, %q) unexpected error: %v", tt.name, tt.zoneName, err)
+            continue
+        }
         if got != tt.want {
             t.Errorf("NormalizeRRSetName(%q, %q) = %q, want %q", tt.name, tt.zoneName, got, tt.want)
+        }
+    }
+}
+
+func TestNormalizeRRSetName_InvalidZone(t *testing.T) {
+    tests := []struct {
+        name     string
+        zoneName string
+    }{
+        {"other.com.", "example.com."},
+        {"hack.ru.", "example.com."},
+        {"www.other.com.", "example.com."},
+    }
+    for _, tt := range tests {
+        _, err := NormalizeRRSetName(tt.name, tt.zoneName)
+        if err == nil {
+            t.Errorf("NormalizeRRSetName(%q, %q) expected error, got nil", tt.name, tt.zoneName)
         }
     }
 }
