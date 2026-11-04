@@ -1,8 +1,10 @@
 package rest
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -277,5 +279,34 @@ func TestAuthMiddleware_CaseInsensitiveBearer(t *testing.T) {
 				t.Errorf("Expected status %d, got %d", tt.wantStatus, w.Code)
 			}
 		})
+	}
+}
+
+// countingReader counts how many bytes the server consumed from the request body
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	cr.n += int64(n)
+	return n, err
+}
+
+func TestBodyLimit_AppliesToAdminRoutes(t *testing.T) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	cfg := &config.Config{APIToken: "t", Admin: config.AdminConfig{Enabled: true, Username: "admin", PasswordHash: string(hash)}}
+	_, r := setupTestServer(t, cfg)
+
+	const size = 20 << 20
+	body := "--b\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\n" + strings.Repeat("x", size) + "\r\n--b--\r\n"
+	cr := &countingReader{r: strings.NewReader(body)}
+	req := httptest.NewRequest(http.MethodPost, "/admin/login", cr)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=b")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	if cr.n > 11<<20 {
+		t.Fatalf("server read %d bytes of the body, limit is 10 MB", cr.n)
 	}
 }

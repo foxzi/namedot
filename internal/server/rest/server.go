@@ -54,6 +54,14 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 		r.Use(ipACLMiddleware(cfg.AllowedCIDRs))
 	}
 
+	// Limit request body size to prevent DoS via large payloads (10 MB).
+	// Registered before any route: gin applies middleware only to routes added after Use.
+	const maxBodyBytes = 10 << 20
+	r.Use(func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+		c.Next()
+	})
+
 	s := &Server{cfg: cfg, db: db, r: r, dnsServer: dnsServer}
 
 	// Public endpoints (no auth)
@@ -70,13 +78,6 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 		webAdmin.RegisterRoutes(r)
 		log.Printf("Web admin panel enabled at /admin")
 	}
-
-	// Limit request body size to prevent DoS via large payloads (10 MB)
-	const maxBodyBytes = 10 << 20
-	r.Use(func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
-		c.Next()
-	})
 
 	auth := func(c *gin.Context) {
 		token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
