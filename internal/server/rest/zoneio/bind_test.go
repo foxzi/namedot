@@ -202,3 +202,27 @@ func TestImportJSON_AtSymbol(t *testing.T) {
         t.Errorf("expected www to expand to 'www.test.com.', got %q", sets[1].Name)
     }
 }
+
+func TestImportBIND_ParseErrorKeepsZone(t *testing.T) {
+    db := newTestDB(t)
+    z := dbm.Zone{Name: "parse-error.test."}
+    if err := db.Create(&z).Error; err != nil { t.Fatalf("create zone: %v", err) }
+
+    good := "www 300 IN A 192.0.2.1\n"
+    if err := ImportBIND(db, &z, strings.NewReader(good), "replace", 300); err != nil {
+        t.Fatalf("initial import: %v", err)
+    }
+
+    bad := "a 300 IN A 192.0.2.10\nb 300 IN A not-an-ip\n"
+    if err := ImportBIND(db, &z, strings.NewReader(bad), "replace", 300); err == nil {
+        t.Fatalf("expected parse error, got nil")
+    }
+
+    var names []string
+    if err := db.Model(&dbm.RRSet{}).Where("zone_id = ?", z.ID).Pluck("name", &names).Error; err != nil {
+        t.Fatalf("load rrsets: %v", err)
+    }
+    if len(names) != 1 || names[0] != "www.parse-error.test." {
+        t.Fatalf("zone must stay unchanged after failed import, got %v", names)
+    }
+}

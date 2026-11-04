@@ -37,7 +37,6 @@ func ImportBIND(db *gorm.DB, zone *dbm.Zone, r io.Reader, mode string, defaultTT
     rrsets := map[key]*dbm.RRSet{}
 
     for rr, ok := zp.Next(); ok; rr, ok = zp.Next() {
-        if err := zp.Err(); err != nil { return err }
         if rr == nil { continue }
         hdr := rr.Header()
         name := strings.ToLower(dns.Fqdn(hdr.Name))
@@ -55,6 +54,10 @@ func ImportBIND(db *gorm.DB, zone *dbm.Zone, r io.Reader, mode string, defaultTT
         data := rdataFromRR(rr)
         rs.Records = append(rs.Records, dbm.RData{Data: data})
         // keep the first TTL if already set
+    }
+    // Next() stops on a parse error, so check it only after the loop
+    if err := zp.Err(); err != nil {
+        return err
     }
 
     return db.Transaction(func(tx *gorm.DB) error {
