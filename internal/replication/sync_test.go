@@ -630,3 +630,60 @@ func TestApplyData_EmptyData(t *testing.T) {
 		t.Fatalf("ApplyData failed on empty data: %v", err)
 	}
 }
+
+func TestApplyData_RemovesZonesDeletedOnMaster(t *testing.T) {
+	client, db := setupTestClient(t, "http://unused")
+	zone := func(name string) dbm.Zone {
+		return dbm.Zone{Name: name, RRSets: []dbm.RRSet{{Name: name + ".", Type: "A", TTL: 60, Records: []dbm.RData{{Data: "192.0.2.1"}}}}}
+	}
+	first := &SyncData{
+		Zones:     []dbm.Zone{zone("keep.test"), zone("gone.test")},
+		Templates: []dbm.Template{{Name: "keep"}, {Name: "gone"}},
+	}
+	if err := client.ApplyData(first); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	second := &SyncData{Zones: []dbm.Zone{zone("keep.test")}, Templates: []dbm.Template{{Name: "keep"}}}
+	if err := client.ApplyData(second); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+
+	var zones []string
+	db.Model(&dbm.Zone{}).Pluck("name", &zones)
+	if len(zones) != 1 || zones[0] != "keep.test." {
+		t.Fatalf("zones = %v, want [keep.test.]", zones)
+	}
+	var rrsets, records, templates int64
+	db.Model(&dbm.RRSet{}).Count(&rrsets)
+	db.Model(&dbm.RData{}).Count(&records)
+	db.Model(&dbm.Template{}).Count(&templates)
+	if rrsets != 1 || records != 1 || templates != 1 {
+		t.Fatalf("leftovers: rrsets=%d records=%d templates=%d, want 1/1/1", rrsets, records, templates)
+	}
+
+	// Empty payload must not wipe the slave
+	if err := client.ApplyData(&SyncData{}); err != nil {
+		t.Fatalf("empty apply: %v", err)
+	}
+	var count int64
+	db.Model(&dbm.Zone{}).Count(&count)
+	if count != 1 {
+		t.Fatalf("empty payload wiped zones: count=%d", count)
+	}
+}
+
+func TestSyncOnce_CallsOnApplied(t *testing.T) {
+	master := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"zones":[{"name":"a.test"}],"templates":[]}`))
+	}))
+	defer master.Close()
+	client, _ := setupTestClient(t, master.URL)
+	called := false
+	client.OnApplied = func() { called = true }
+	if err := client.SyncOnce(context.Background()); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !called {
+		t.Fatalf("OnApplied was not called")
+	}
+}

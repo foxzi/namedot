@@ -233,6 +233,7 @@ func main() {
 	// Start replication sync worker for slave mode
 	if cfg.Replication.Mode == "slave" {
 		syncClient := replication.NewSyncClient(cfg, gormDB)
+		syncClient.OnApplied = dnsServer.InvalidateZoneCache
 		go func() {
 			// Wait a bit for REST server to start
 			time.Sleep(2 * time.Second)

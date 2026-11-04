@@ -27,6 +27,8 @@ type SyncClient struct {
     cfg    *config.Config
     db     *gorm.DB
     client *http.Client
+    // OnApplied is called after synced data is applied (e.g. DNS cache invalidation)
+    OnApplied func()
 }
 
 // NewSyncClient creates a new sync client
@@ -180,8 +182,60 @@ func (s *SyncClient) ApplyData(data *SyncData) error {
             }
         }
 
-        return nil
+        // An empty payload is more likely a broken master than an empty one:
+        // never wipe the slave because of it
+        if len(data.Zones) == 0 {
+            return nil
+        }
+        return deleteMissing(tx, data)
     })
+}
+
+// deleteMissing removes zones and templates that no longer exist on master
+func deleteMissing(tx *gorm.DB, data *SyncData) error {
+    zoneNames := make([]string, 0, len(data.Zones))
+    for _, z := range data.Zones {
+        zoneNames = append(zoneNames, normalizeFQDN(z.Name))
+    }
+    var staleZoneIDs []uint
+    if err := tx.Model(&dbm.Zone{}).Where("name NOT IN ?", zoneNames).Pluck("id", &staleZoneIDs).Error; err != nil {
+        return fmt.Errorf("find stale zones: %w", err)
+    }
+    if len(staleZoneIDs) > 0 {
+        rrsetIDs := tx.Model(&dbm.RRSet{}).Select("id").Where("zone_id IN ?", staleZoneIDs)
+        if err := tx.Where("rr_set_id IN (?)", rrsetIDs).Delete(&dbm.RData{}).Error; err != nil {
+            return fmt.Errorf("delete stale records: %w", err)
+        }
+        if err := tx.Where("zone_id IN ?", staleZoneIDs).Delete(&dbm.RRSet{}).Error; err != nil {
+            return fmt.Errorf("delete stale rrsets: %w", err)
+        }
+        if err := tx.Where("id IN ?", staleZoneIDs).Delete(&dbm.Zone{}).Error; err != nil {
+            return fmt.Errorf("delete stale zones: %w", err)
+        }
+        log.Printf("Sync: removed %d zones deleted on master", len(staleZoneIDs))
+    }
+
+    tmplNames := make([]string, 0, len(data.Templates))
+    for _, t := range data.Templates {
+        tmplNames = append(tmplNames, t.Name)
+    }
+    staleTmpl := tx.Model(&dbm.Template{})
+    if len(tmplNames) > 0 {
+        staleTmpl = staleTmpl.Where("name NOT IN ?", tmplNames)
+    }
+    var staleTmplIDs []uint
+    if err := staleTmpl.Pluck("id", &staleTmplIDs).Error; err != nil {
+        return fmt.Errorf("find stale templates: %w", err)
+    }
+    if len(staleTmplIDs) > 0 {
+        if err := tx.Where("template_id IN ?", staleTmplIDs).Delete(&dbm.TemplateRecord{}).Error; err != nil {
+            return fmt.Errorf("delete stale template records: %w", err)
+        }
+        if err := tx.Where("id IN ?", staleTmplIDs).Delete(&dbm.Template{}).Error; err != nil {
+            return fmt.Errorf("delete stale templates: %w", err)
+        }
+    }
+    return nil
 }
 
 // normalizeFQDN ensures name is lowercase and ends with a dot
@@ -230,6 +284,9 @@ func (s *SyncClient) SyncOnce(ctx context.Context) error {
 
     if err := s.ApplyData(data); err != nil {
         return fmt.Errorf("apply data: %w", err)
+    }
+    if s.OnApplied != nil {
+        s.OnApplied()
     }
 
     log.Println("Sync completed successfully")
