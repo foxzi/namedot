@@ -210,14 +210,7 @@ func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answer
 		// Store in cache for future use
 		s.zoneCache.Set(zones)
 	}
-	var zone *dbm.Zone
-	for i := range zones {
-		name := dns.Fqdn(strings.ToLower(zones[i].Name))
-		if strings.HasSuffix(qname, name) {
-			zone = &zones[i]
-			break
-		}
-	}
+	zone := findZone(zones, qname)
 	if zone == nil {
 		return nil, 0, "", fmt.Errorf("no zone")
 	}
@@ -242,6 +235,17 @@ func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answer
 	}
 
 	return nil, 0, "", fmt.Errorf("not found")
+}
+
+// findZone returns the longest zone containing qname; zones must be sorted by name length desc.
+// Matching is done on label boundaries, so zone "ample.com." does not contain "example.com.".
+func findZone(zones []dbm.Zone, qname string) *dbm.Zone {
+	for i := range zones {
+		if dns.IsSubDomain(dns.Fqdn(strings.ToLower(zones[i].Name)), qname) {
+			return &zones[i]
+		}
+	}
+	return nil
 }
 
 // lookupExact tries exact name+type match, then CNAME fallback for the given name.

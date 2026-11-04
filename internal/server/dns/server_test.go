@@ -326,3 +326,16 @@ func TestInvalidateZoneCache_ClearsAnswerCache(t *testing.T) {
 		t.Fatalf("answer cache must be empty after InvalidateZoneCache")
 	}
 }
+
+func TestFindZone_LabelBoundary(t *testing.T) {
+	zones := []dbm.Zone{{Name: "ample.com."}, {Name: "example.com."}}
+	if z := findZone(zones, "www.example.com."); z == nil || z.Name != "example.com." {
+		t.Fatalf("www.example.com. must belong to example.com., got %+v", z)
+	}
+	if z := findZone(zones[:1], "example.com."); z != nil {
+		t.Fatalf("example.com. must not belong to ample.com.")
+	}
+	if z := findZone(zones, "ample.com."); z == nil || z.Name != "ample.com." {
+		t.Fatalf("apex must match its zone, got %+v", z)
+	}
+}
