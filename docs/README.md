@@ -7,7 +7,7 @@ Overview
 - HTTPS support with automatic certificate reloading
 - IP-based access control (CIDR whitelist)
 - Geo-aware responses (subnet/country/continent), ECS support
-- Optional forwarder for cache-miss
+- Optional forwarder for names outside the served zones; misses inside own zones get NXDOMAIN/NODATA with the zone SOA
 - Simple in-memory TTL cache
 - Master-Slave replication via REST API
 
@@ -427,7 +427,7 @@ SmaillGeoDNS — Легковесный DNS-сервер с REST API + GeoDNS
 - Поддержка HTTPS с автоматической перезагрузкой сертификатов
 - Контроль доступа по IP (whitelist на основе CIDR)
 - Geo-aware ответы (подсеть/страна/континент), поддержка ECS
-- Опциональный форвардер при отсутствии записи в кеше
+- Опциональный форвардер для имён вне обслуживаемых зон; для отсутствующих имён своих зон — NXDOMAIN/NODATA с SOA зоны
 - Простой in-memory TTL кеш
 - Master-Slave репликация через REST API
 

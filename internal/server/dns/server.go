@@ -170,7 +170,23 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	// Forward on miss
+	// Names inside our own zones are answered authoritatively (RFC 2308):
+	// NXDOMAIN or NODATA with the zone SOA, never forwarded.
+	if zone := s.zoneFor(q.Name); zone != nil {
+		rcode, soa, negTTL := s.negativeAnswer(zone, strings.ToLower(dns.Fqdn(q.Name)))
+		log.Printf("DNS QUERY negative q=%s type=%s from=%s%s rcode=%s id=%d", q.Name, dns.TypeToString[q.Qtype], w.RemoteAddr(), geoStr, dns.RcodeToString[rcode], r.Id)
+		m.Rcode = rcode
+		if soa != nil {
+			m.Ns = []dns.RR{soa}
+		}
+		writeMsg(w, r, m)
+		if negTTL > 0 {
+			s.cache.Set(key, m.Copy(), time.Duration(negTTL)*time.Second)
+		}
+		return
+	}
+
+	// Forward names outside our zones
 	if s.cfg.Forwarder != "" {
 		fwd := new(dns.Msg)
 		fwd.SetQuestion(dns.Fqdn(q.Name), q.Qtype)
@@ -193,6 +209,48 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	_ = w.WriteMsg(m)
 	// Cache local negative responses (no zone found) with short TTL to prevent repeated lookups
 	s.cache.Set(key, m.Copy(), 5*time.Minute)
+}
+
+// zoneFor returns the zone that contains qname, or nil.
+func (s *Server) zoneFor(qname string) *dbm.Zone {
+	zones, err := s.loadZones()
+	if err != nil {
+		return nil
+	}
+	return findZone(zones, strings.ToLower(dns.Fqdn(qname)))
+}
+
+// negativeAnswer decides between NXDOMAIN and NODATA for a name of zone that has
+// no answer, and returns the zone SOA for the authority section together with the
+// negative caching TTL: min(SOA TTL, SOA minimum).
+func (s *Server) negativeAnswer(zone *dbm.Zone, qname string) (int, dns.RR, uint32) {
+	rcode := dns.RcodeNameError
+	// The name exists if it owns records, is an empty non-terminal or matches a wildcard.
+	names := append([]string{qname}, wildcardNames(qname, dns.Fqdn(strings.ToLower(zone.Name)))...)
+	var n int64
+	s.db.Model(&dbm.RRSet{}).
+		Where("zone_id = ? AND (name IN ? OR name LIKE ? ESCAPE '!')", zone.ID, names, "%."+escapeLike(qname)).
+		Count(&n)
+	if n > 0 {
+		rcode = dns.RcodeSuccess
+	}
+
+	var set dbm.RRSet
+	if err := s.db.Preload("Records").Where("zone_id = ? AND type = ?", zone.ID, "SOA").First(&set).Error; err != nil || len(set.Records) == 0 {
+		return rcode, nil, 300
+	}
+	rr, err := dns.NewRR(fmt.Sprintf("%s %d SOA %s", dns.Fqdn(set.Name), set.TTL, set.Records[0].Data))
+	soa, ok := rr.(*dns.SOA)
+	if err != nil || !ok {
+		return rcode, nil, 300
+	}
+	ttl := min(soa.Hdr.Ttl, soa.Minttl)
+	soa.Hdr.Ttl = ttl
+	return rcode, soa, ttl
+}
+
+func escapeLike(s string) string {
+	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(s)
 }
 
 // writeMsg sends m, truncating UDP answers to the client buffer size (512 bytes
@@ -218,14 +276,9 @@ func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answer
 	qtype := dns.TypeToString[q.Qtype]
 
 	// Find the best matching zone suffix (using cache)
-	zones := s.zoneCache.Get()
-	if zones == nil {
-		// Cache miss or expired, fetch from database
-		if err := s.db.Order("length(name) desc").Find(&zones).Error; err != nil {
-			return nil, 0, "", err
-		}
-		// Store in cache for future use
-		s.zoneCache.Set(zones)
+	zones, err := s.loadZones()
+	if err != nil {
+		return nil, 0, "", err
 	}
 	zone := findZone(zones, qname)
 	if zone == nil {
@@ -252,6 +305,19 @@ func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answer
 	}
 
 	return nil, 0, "", fmt.Errorf("not found")
+}
+
+// loadZones returns all zones sorted by name length desc, using the zone cache.
+func (s *Server) loadZones() ([]dbm.Zone, error) {
+	zones := s.zoneCache.Get()
+	if zones == nil {
+		// Cache miss or expired, fetch from database
+		if err := s.db.Order("length(name) desc").Find(&zones).Error; err != nil {
+			return nil, err
+		}
+		s.zoneCache.Set(zones)
+	}
+	return zones, nil
 }
 
 // findZone returns the longest zone containing qname; zones must be sorted by name length desc.

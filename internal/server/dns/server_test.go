@@ -368,3 +368,43 @@ func TestServeDNS_TruncatesLargeUDPAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestServeDNS_NegativeAnswersInOwnZone(t *testing.T) {
+	s, db := newTestServer(t)
+	s.cfg.Forwarder = "192.0.2.1" // must not be used for names of our zones
+	z := dbm.Zone{Name: "example.com."}
+	db.Create(&z)
+	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "example.com.", Type: "SOA", TTL: 3600,
+		Records: []dbm.RData{{Data: "ns1.example.com. hostmaster.example.com. 1 7200 3600 1209600 300"}}})
+	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "www.example.com.", Type: "A", TTL: 60, Records: []dbm.RData{{Data: "192.0.2.10"}}})
+	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "a.b.example.com.", Type: "A", TTL: 60, Records: []dbm.RData{{Data: "192.0.2.11"}}})
+
+	cases := []struct {
+		name  string
+		qtype uint16
+		rcode int
+	}{
+		{"nope.example.com.", dns.TypeA, dns.RcodeNameError},
+		{"www.example.com.", dns.TypeAAAA, dns.RcodeSuccess}, // NODATA
+		{"b.example.com.", dns.TypeA, dns.RcodeSuccess},      // empty non-terminal
+	}
+	for _, c := range cases {
+		req := new(dns.Msg)
+		req.SetQuestion(c.name, c.qtype)
+		w := &cacheWriter{}
+		s.serveDNS(w, req)
+		if w.msg == nil {
+			t.Fatalf("%s: no answer", c.name)
+		}
+		if w.msg.Rcode != c.rcode || len(w.msg.Answer) != 0 || !w.msg.Authoritative {
+			t.Fatalf("%s: want rcode %d, empty authoritative answer, got %v", c.name, c.rcode, w.msg)
+		}
+		if len(w.msg.Ns) != 1 {
+			t.Fatalf("%s: want SOA in authority section, got %v", c.name, w.msg.Ns)
+		}
+		soa, ok := w.msg.Ns[0].(*dns.SOA)
+		if !ok || soa.Hdr.Ttl != 300 {
+			t.Fatalf("%s: want SOA with negative TTL 300, got %v", c.name, w.msg.Ns[0])
+		}
+	}
+}
