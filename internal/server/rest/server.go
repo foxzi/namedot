@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -92,7 +93,7 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 			}
 		} else if s.cfg.APIToken != "" {
 			// Fallback to plain text comparison (deprecated)
-			if token == s.cfg.APIToken {
+			if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.APIToken)) == 1 {
 				authenticated = true
 			}
 		} else {
