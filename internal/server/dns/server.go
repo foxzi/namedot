@@ -92,10 +92,13 @@ func (s *Server) Shutdown() error {
 	return nil
 }
 
-// InvalidateZoneCache clears the zone cache, forcing a refresh on next DNS query
+// InvalidateZoneCache clears the zone cache and cached answers, forcing a refresh on next DNS query
 func (s *Server) InvalidateZoneCache() {
 	if s.zoneCache != nil {
 		s.zoneCache.Invalidate()
+	}
+	if s.cache != nil {
+		s.cache.Clear()
 	}
 }
 

@@ -316,3 +316,13 @@ func TestLookup_CNAME_Fallback(t *testing.T) {
 		t.Fatalf("want CNAME got %s", dns.TypeToString[ans[0].Header().Rrtype])
 	}
 }
+
+func TestInvalidateZoneCache_ClearsAnswerCache(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.cache = cache.New(10)
+	s.cache.Set("www.example.com.|1|", new(dns.Msg), time.Minute)
+	s.InvalidateZoneCache()
+	if _, ok := s.cache.Get("www.example.com.|1|"); ok {
+		t.Fatalf("answer cache must be empty after InvalidateZoneCache")
+	}
+}

@@ -49,3 +49,10 @@ func (c *Cache) Get(key string) (any, bool) {
     return it.value, true
 }
 
+
+// Clear removes all items.
+func (c *Cache) Clear() {
+    c.mu.Lock()
+    c.data = make(map[string]item, c.size)
+    c.mu.Unlock()
+}
