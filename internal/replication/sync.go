@@ -7,6 +7,7 @@ import (
     "io"
     "log"
     "net/http"
+    "sort"
     "strings"
     "time"
 
@@ -88,7 +89,13 @@ func (s *SyncClient) ApplyData(data *SyncData) error {
             zoneName := normalizeFQDN(zone.Name)
 
             var existingZone dbm.Zone
-            err := tx.Where("name = ?", zoneName).First(&existingZone).Error
+            err := tx.Preload("RRSets.Records").Where("name = ?", zoneName).First(&existingZone).Error
+
+            // Rewriting an unchanged zone gives its rrsets new IDs, and DNS reads
+            // racing with that briefly see a name without records
+            if err == nil && zoneContent(existingZone.RRSets, zoneName) == zoneContent(zone.RRSets, zoneName) {
+                continue
+            }
 
             if err == gorm.ErrRecordNotFound {
                 // Create new zone
@@ -236,6 +243,32 @@ func deleteMissing(tx *gorm.DB, data *SyncData) error {
         }
     }
     return nil
+}
+
+// zoneContent returns a canonical text form of the zone records for comparison
+func zoneContent(rrsets []dbm.RRSet, zoneName string) string {
+    str := func(p *string) string {
+        if p == nil {
+            return "-"
+        }
+        return *p
+    }
+    var lines []string
+    for _, set := range rrsets {
+        head := fmt.Sprintf("%s %s %d", normalizeRRSetName(set.Name, zoneName), strings.ToUpper(set.Type), set.TTL)
+        if len(set.Records) == 0 {
+            lines = append(lines, head)
+        }
+        for _, r := range set.Records {
+            asn := "-"
+            if r.ASN != nil {
+                asn = fmt.Sprint(*r.ASN)
+            }
+            lines = append(lines, fmt.Sprintf("%s %q %s %s %s %s", head, r.Data, str(r.Country), str(r.Continent), asn, str(r.Subnet)))
+        }
+    }
+    sort.Strings(lines)
+    return strings.Join(lines, "\n")
 }
 
 // normalizeFQDN ensures name is lowercase and ends with a dot

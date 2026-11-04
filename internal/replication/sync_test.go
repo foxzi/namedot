@@ -3,6 +3,7 @@ package replication
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -685,5 +686,40 @@ func TestSyncOnce_CallsOnApplied(t *testing.T) {
 	}
 	if !called {
 		t.Fatalf("OnApplied was not called")
+	}
+}
+
+func TestApplyData_KeepsUnchangedZones(t *testing.T) {
+	client, db := setupTestClient(t, "http://unused")
+	ru := "RU"
+	data := func(ip string) *SyncData {
+		return &SyncData{Zones: []dbm.Zone{{Name: "a.test", RRSets: []dbm.RRSet{
+			{Name: "@", Type: "A", TTL: 60, Records: []dbm.RData{{Data: ip, Country: &ru}, {Data: "192.0.2.9"}}},
+			{Name: "www", Type: "CNAME", TTL: 60, Records: []dbm.RData{{Data: "a.test."}}},
+		}}}}
+	}
+	ids := func() []uint {
+		var ids []uint
+		db.Model(&dbm.RRSet{}).Order("id").Pluck("id", &ids)
+		return ids
+	}
+	if err := client.ApplyData(data("192.0.2.1")); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	before := ids()
+	if err := client.ApplyData(data("192.0.2.1")); err != nil {
+		t.Fatalf("same apply: %v", err)
+	}
+	if after := ids(); fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatalf("unchanged zone was rewritten: rrset ids %v -> %v", before, after)
+	}
+
+	if err := client.ApplyData(data("192.0.2.2")); err != nil {
+		t.Fatalf("changed apply: %v", err)
+	}
+	var n int64
+	db.Model(&dbm.RData{}).Where("data = ? AND country = ?", "192.0.2.2", "RU").Count(&n)
+	if n != 1 {
+		t.Fatalf("changed zone was not applied")
 	}
 }
