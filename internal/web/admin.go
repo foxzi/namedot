@@ -70,6 +70,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.GET("/admin/login", s.loginPage)
 	r.POST("/admin/login", s.loginSubmit)
 	r.GET("/admin/lang/:code", s.setLang)
+	// Logout is outside the protected group: htmxRedirectMiddleware would
+	// render the dashboard for this plain link instead of logging out
+	r.GET("/admin/logout", s.logout)
 
 	// Protected routes
 	admin := r.Group("/admin")
@@ -78,7 +81,6 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	admin.Use(s.onChangeMiddleware())
 	{
 		admin.GET("/", s.dashboard)
-		admin.GET("/logout", s.logout)
 
 		// Zones
 		admin.GET("/zones", s.listZones)

@@ -274,3 +274,30 @@ func TestOnChange_CalledAfterSuccessfulMutation(t *testing.T) {
 		t.Fatalf("OnChange must run once after zone create, calls=%d", calls)
 	}
 }
+
+func TestLogout_DeletesSession(t *testing.T) {
+	s, r := newTestWebWithPasswordHash(t, "", false)
+
+	sid := "active"
+	setTestSession(s, sid, &Session{
+		Username:  "admin",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+		CSRFToken: "csrf",
+	})
+
+	req := httptest.NewRequest("GET", "/admin/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: sid, Path: "/admin"})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "/admin/login" {
+		t.Fatalf("expected redirect to login, got %d %q", w.Code, w.Header().Get("Location"))
+	}
+	s.sessionsMu.RLock()
+	_, exists := s.sessions[sid]
+	s.sessionsMu.RUnlock()
+	if exists {
+		t.Fatalf("expected session to be removed")
+	}
+}
