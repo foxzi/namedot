@@ -382,3 +382,20 @@ func TestUpdateRecord_IgnoresFormIDs(t *testing.T) {
 		t.Fatalf("TTL went to the wrong rrset: own=%d other=%d", ownSet.TTL, otherSet.TTL)
 	}
 }
+
+func TestLoginSubmit_PurgesExpiredSessions(t *testing.T) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	s, r := newTestWebWithPasswordHash(t, string(hash), false)
+	s.sessions["old"] = &Session{Username: "admin", ExpiresAt: time.Now().Add(-time.Hour)}
+
+	req := httptest.NewRequest("POST", "/admin/login", strings.NewReader("username=admin&password=secret"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	if _, ok := s.sessions["old"]; ok {
+		t.Fatal("expired session must be removed on login")
+	}
+	if len(s.sessions) != 1 {
+		t.Fatalf("expected only the new session, got %d", len(s.sessions))
+	}
+}

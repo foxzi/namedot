@@ -220,6 +220,13 @@ func (s *Server) loginSubmit(c *gin.Context) {
 	sessionID := s.generateSessionID()
 	csrfToken := s.generateSessionID()
 	s.sessionsMu.Lock()
+	// Drop expired sessions, otherwise abandoned ones stay in memory forever
+	now := time.Now()
+	for id, sess := range s.sessions {
+		if now.After(sess.ExpiresAt) {
+			delete(s.sessions, id)
+		}
+	}
 	s.sessions[sessionID] = &Session{
 		Username:  username,
 		CreatedAt: time.Now(),
