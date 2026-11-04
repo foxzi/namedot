@@ -237,3 +237,40 @@ func TestCSRFMiddleware_AllowsValidOrigin(t *testing.T) {
 		t.Fatalf("status %d", w.Code)
 	}
 }
+
+func TestOnChange_CalledAfterSuccessfulMutation(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	s, r := newTestWebWithPasswordHash(t, string(hash), false)
+	calls := 0
+	s.OnChange = func() { calls++ }
+
+	sid := "sess"
+	setTestSession(s, sid, &Session{
+		Username:  "admin",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+		CSRFToken: "csrf",
+	})
+	post := func(body string) {
+		req := httptest.NewRequest("POST", "/admin/zones", strings.NewReader(body))
+		req.Host = "example.com"
+		req.AddCookie(&http.Cookie{Name: "session", Value: sid, Path: "/admin"})
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		req.Header.Set("X-CSRF-Token", "csrf")
+		req.Header.Set("Origin", "http://example.com")
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	post("name=")
+	if calls != 0 {
+		t.Fatalf("OnChange must not run on failed request, calls=%d", calls)
+	}
+	post("name=onchange.test")
+	if calls != 1 {
+		t.Fatalf("OnChange must run once after zone create, calls=%d", calls)
+	}
+}

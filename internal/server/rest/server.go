@@ -64,6 +64,9 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 	if err != nil {
 		log.Printf("Web admin initialization error: %v", err)
 	} else if webAdmin != nil {
+		if dnsServer != nil {
+			webAdmin.OnChange = dnsServer.InvalidateZoneCache
+		}
 		webAdmin.RegisterRoutes(r)
 		log.Printf("Web admin panel enabled at /admin")
 	}

@@ -27,6 +27,8 @@ type Server struct {
 	tmpl       *template.Template
 	sessions   map[string]*Session // sessionID -> Session
 	sessionsMu sync.RWMutex
+	// OnChange is called after a successful data change (e.g. DNS cache invalidation)
+	OnChange func()
 }
 
 type Session struct {
@@ -73,6 +75,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	admin := r.Group("/admin")
 	admin.Use(s.authMiddleware())
 	admin.Use(s.htmxRedirectMiddleware())
+	admin.Use(s.onChangeMiddleware())
 	{
 		admin.GET("/", s.dashboard)
 		admin.GET("/logout", s.logout)
@@ -104,6 +107,16 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 		admin.DELETE("/templates/records/:id", s.csrfMiddleware(), s.deleteTemplateRecord)
 		admin.GET("/templates/:id/apply", s.applyTemplateForm)
 		admin.POST("/templates/:id/apply", s.csrfMiddleware(), s.applyTemplate)
+	}
+}
+
+// onChangeMiddleware calls OnChange after successful state-changing requests
+func (s *Server) onChangeMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		if s.OnChange != nil && c.Request.Method != http.MethodGet && c.Writer.Status() < 400 {
+			s.OnChange()
+		}
 	}
 }
 
