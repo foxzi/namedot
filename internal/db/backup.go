@@ -60,6 +60,9 @@ func ImportZones(db *gorm.DB, filename string, mode string) error {
 	if err := json.Unmarshal(data, &backup); err != nil {
 		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
+	if mode == "replace" && len(backup.Zones) == 0 {
+		return fmt.Errorf("backup contains no zones, refusing to replace existing data")
+	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		if mode == "replace" {
