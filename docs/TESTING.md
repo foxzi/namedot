@@ -102,6 +102,21 @@ go test -cover ./internal/server/rest -run TestSync
 go test -v ./internal/server/rest
 ```
 
+### Local Cluster Test (`internal/integration/cluster_test.go`)
+
+Builds the `namedot` binary and runs 5 real processes on free localhost ports:
+
+- `master-a` with zones `example.com` and child zone `sub.example.com`, slaves `slave-a1`, `slave-a2`
+- `master-b` with zones `example.org` (geo records by subnet) and `example.net`, slave `slave-b1`
+
+Checks:
+- masters answer A, AAAA, MX, TXT, CNAME, wildcard, child zone, NXDOMAIN/NODATA with SOA, geo selection by ECS
+- slaves give the same answers as their master and know nothing about zones of the other cluster
+- update of an rrset, a new zone and a deleted zone on the master reach the slaves (sync every second)
+- a slave keeps serving its data after the master stops
+
+Run: `make test-cluster` (skipped with `go test -short`). Node logs are printed when the test fails.
+
 ## Test Statistics
 
 ```bash

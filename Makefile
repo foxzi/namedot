@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.GitCommit=$(COMMIT) -X main.BuildDate=$(DATE)"
 
-.PHONY: all build run test test-all test-unit test-int test-geo test-integration-geodns test-integration-records test-integration test-cover test-verbose test-report mmdb-clean clean package package-deb package-rpm build-docker build-in-docker
+.PHONY: all build run test test-all test-unit test-int test-cluster test-geo test-integration-geodns test-integration-records test-integration test-cover test-verbose test-report mmdb-clean clean package package-deb package-rpm build-docker build-in-docker
 
 all: build
 
@@ -29,6 +29,9 @@ test-unit:
 
 test-int:
 	$(GO) test ./internal/integration -count=1
+
+test-cluster:
+	$(GO) test ./internal/integration -run 'TestCluster' -count=1 -v
 
 test-geo:
 	$(GO) test ./internal/integration -run 'GeoDNS' -count=1

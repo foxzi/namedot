@@ -102,6 +102,21 @@ go test -cover ./internal/server/rest -run TestSync
 go test -v ./internal/server/rest
 ```
 
+### Локальный тест кластера (`internal/integration/cluster_test.go`)
+
+Собирает бинарник `namedot` и запускает 5 настоящих процессов на свободных портах localhost:
+
+- `master-a` с зонами `example.com` и дочерней `sub.example.com`, слейвы `slave-a1`, `slave-a2`
+- `master-b` с зонами `example.org` (гео-записи по подсети) и `example.net`, слейв `slave-b1`
+
+Проверяет:
+- мастеры отвечают A, AAAA, MX, TXT, CNAME, wildcard, дочерней зоной, NXDOMAIN/NODATA с SOA, гео-выбором по ECS
+- слейвы отвечают так же, как их мастер, и ничего не знают о зонах другого кластера
+- изменение rrset, новая зона и удалённая зона на мастере доходят до слейвов (синхронизация раз в секунду)
+- слейв продолжает отвечать своими данными после остановки мастера
+
+Запуск: `make test-cluster` (пропускается при `go test -short`). При падении теста печатаются логи узлов.
+
 ## Статистика тестов
 
 ```bash
