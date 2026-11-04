@@ -89,7 +89,7 @@ func (s *Server) listZones(c *gin.Context) {
 				`+s.tr(c, "Clear")+`
 			</button>
 		</form>
-	</div>`, search)
+	</div>`, he(search))
 
 	html := searchForm + `<table>
         <thead>

@@ -140,7 +140,7 @@ func (s *Server) viewTemplate(c *gin.Context) {
         <h2>%s</h2>
         <p style="color: #718096; margin-bottom: 1.5rem;">%s</p>
 
-        <h3 style="margin-bottom: 1rem;">%s</h3>`, s.tr(c, "← Back to Templates"), template.Name, template.Description, s.tr(c, "Template Records"))
+        <h3 style="margin-bottom: 1rem;">%s</h3>`, s.tr(c, "← Back to Templates"), he(template.Name), he(template.Description), s.tr(c, "Template Records"))
 
 	if len(template.Records) == 0 {
 		html += `<p style="color: #718096;">` + s.tr(c, "No records in this template.") + `</p>`
@@ -250,9 +250,9 @@ func (s *Server) editTemplateForm(c *gin.Context) {
 		s.tr(c, "Template Placeholders Guide"),
 		s.tr(c, "Use"),
 		s.tr(c, "in Name and Data fields - it will be replaced with the actual domain when applying the template"),
-		s.trf(c, "Edit Template: %s", template.Name), id,
-		s.tr(c, "Template Name"), template.Name,
-		s.tr(c, "Description"), template.Description,
+		he(s.trf(c, "Edit Template: %s", template.Name)), id,
+		s.tr(c, "Template Name"), he(template.Name),
+		s.tr(c, "Description"), he(template.Description),
 		s.tr(c, "Update Template"), s.tr(c, "Cancel"),
 		s.tr(c, "Template Records"), id, s.tr(c, "+ Add Record"))
 
@@ -487,7 +487,7 @@ func (s *Server) newTemplateRecordForm(c *gin.Context) {
         </div>
     </div>`,
 		s.tr(c, "Add Template Record"),
-		templateID,
+		he(templateID),
 		s.tr(c, "DNS Record"),
 		s.tr(c, "Name"),
 		s.tr(c, "Data"),
@@ -495,7 +495,7 @@ func (s *Server) newTemplateRecordForm(c *gin.Context) {
 		s.tr(c, "Country Code"),
 		s.tr(c, "Continent Code"),
 		s.tr(c, "Add Record"),
-		templateID,
+		he(templateID),
 		s.tr(c, "Cancel"),
 		s.tr(c, "Help"),
 		s.tr(c, "Placeholders"),
@@ -608,7 +608,7 @@ func (s *Server) applyTemplateForm(c *gin.Context) {
                 <thead>
                     <tr><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr>
                 </thead>
-                <tbody>`, s.trf(c, "Apply Template: %s", template.Name), s.trf(c, "Zone: %s", zone.Name), s.trf(c, "This will create %d records:", len(template.Records)), s.tr(c, "Name"), s.tr(c, "Type"), s.tr(c, "TTL"), s.tr(c, "Data"))
+                <tbody>`, he(s.trf(c, "Apply Template: %s", template.Name)), he(s.trf(c, "Zone: %s", zone.Name)), s.trf(c, "This will create %d records:", len(template.Records)), s.tr(c, "Name"), s.tr(c, "Type"), s.tr(c, "TTL"), s.tr(c, "Data"))
 
 	for _, rec := range template.Records {
 		// Preview with placeholders replaced
@@ -643,7 +643,7 @@ func (s *Server) applyTemplateForm(c *gin.Context) {
                 </button>
             </div>
         </form>
-    </div>`, templateID, zoneID, s.tr(c, "Apply Template"), zoneID, s.tr(c, "Cancel"))
+    </div>`, he(templateID), he(zoneID), s.tr(c, "Apply Template"), he(zoneID), s.tr(c, "Cancel"))
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(http.StatusOK, html)

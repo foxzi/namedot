@@ -81,7 +81,7 @@ func (s *Server) listRecords(c *gin.Context) {
 			<input type="text" name="search" placeholder="`+s.tr(c, "Search records...")+`" value="%s"
 				style="flex: 1; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
 			<select name="type" style="padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">`,
-		zoneID, search)
+		zoneID, he(search))
 
 	for _, rt := range recordTypes {
 		selected := ""
@@ -122,7 +122,7 @@ func (s *Server) listRecords(c *gin.Context) {
 	</div>
 	<div id="template-selector-%d"></div>
 	%s
-	<div id="records-list">`, s.tr(c, "← Back to Zones"), s.trf(c, "Records for %s", zone.Name), zoneID, s.tr(c, "+ Add Record"), zoneID, s.tr(c, "📋 Apply Template"), zoneID, filterForm)
+	<div id="records-list">`, s.tr(c, "← Back to Zones"), he(s.trf(c, "Records for %s", zone.Name)), zoneID, s.tr(c, "+ Add Record"), zoneID, s.tr(c, "📋 Apply Template"), zoneID, filterForm)
 
 	if len(rrsets) == 0 {
 		if search != "" || filterType != "" {
@@ -300,7 +300,7 @@ func (s *Server) newRecordForm(c *gin.Context) {
                 </button>
             </div>
         </form>
-    </div>`, s.tr(c, "Add New Record"), zoneID, s.tr(c, "Name"), s.tr(c, "Use '@' for zone apex"), s.tr(c, "Type"), s.tr(c, "TTL (seconds)"), s.tr(c, "Data (IP/Value)"), s.tr(c, "MX Priority"), s.tr(c, "Lower value = higher priority (only for MX)"), s.tr(c, "GeoIP Targeting (optional)"), s.tr(c, "Country Code"), s.tr(c, "Continent Code"), s.tr(c, "ASN"), s.tr(c, "Subnet"), s.tr(c, "Add Record"), zoneID, s.tr(c, "Cancel"))
+    </div>`, s.tr(c, "Add New Record"), he(zoneID), s.tr(c, "Name"), s.tr(c, "Use '@' for zone apex"), s.tr(c, "Type"), s.tr(c, "TTL (seconds)"), s.tr(c, "Data (IP/Value)"), s.tr(c, "MX Priority"), s.tr(c, "Lower value = higher priority (only for MX)"), s.tr(c, "GeoIP Targeting (optional)"), s.tr(c, "Country Code"), s.tr(c, "Continent Code"), s.tr(c, "ASN"), s.tr(c, "Subnet"), s.tr(c, "Add Record"), he(zoneID), s.tr(c, "Cancel"))
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(http.StatusOK, html)

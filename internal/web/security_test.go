@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -299,5 +300,35 @@ func TestLogout_DeletesSession(t *testing.T) {
 	s.sessionsMu.RUnlock()
 	if exists {
 		t.Fatalf("expected session to be removed")
+	}
+}
+
+func TestListZones_EscapesSearch(t *testing.T) {
+	s, r := newTestWebWithPasswordHash(t, "", false)
+
+	sid := "sess"
+	setTestSession(s, sid, &Session{
+		Username:  "admin",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+		CSRFToken: "csrf",
+	})
+
+	payload := `"><img src=x onerror=alert(1)>`
+	req := httptest.NewRequest("GET", "/admin/zones?search="+url.QueryEscape(payload), nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: sid, Path: "/admin"})
+	req.Header.Set("HX-Request", "true")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "<img src=x") {
+		t.Fatalf("search value not escaped: %s", body)
+	}
+	if !strings.Contains(body, "&lt;img src=x") {
+		t.Fatalf("expected escaped payload in body: %s", body)
 	}
 }
