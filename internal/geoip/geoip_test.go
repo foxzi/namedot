@@ -2,7 +2,10 @@ package geoip
 
 import (
 	"net/netip"
+	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewNoop(t *testing.T) {
@@ -111,9 +114,9 @@ func TestContinentFromCountry(t *testing.T) {
 func TestContinentFromCountry_Fallback(t *testing.T) {
 	// Test fallback logic for unmapped countries
 	tests := []struct {
-		countryCode       string
-		expectedPrefix    string
-		description       string
+		countryCode    string
+		expectedPrefix string
+		description    string
 	}{
 		{"DK", "EU", "Denmark (D prefix) should fallback to Europe"},
 		{"FI", "EU", "Finland (F prefix) should fallback to Europe"},
@@ -236,4 +239,35 @@ func BenchmarkContinentFromCountry_Fallback(b *testing.B) {
 		countryCode := countries[i%len(countries)]
 		continentFromCountry(countryCode)
 	}
+}
+
+func TestNewFromPath_ReloadDuringLookups(t *testing.T) {
+	dir := filepath.Join("..", "..", "geoipdb")
+	p, stop, err := NewFromPath(dir, time.Millisecond, nil, 0)
+	if err != nil {
+		t.Skipf("geoipdb not available: %v", err)
+	}
+	defer stop()
+
+	ip := netip.MustParseAddr("127.0.1.10")
+	want := p.Lookup(ip)
+	if want.Country != "RU" || want.ASN != 65001 {
+		t.Fatalf("unexpected lookup result for %s: %+v", ip, want)
+	}
+
+	var wg sync.WaitGroup
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				if got := p.Lookup(ip); got != want {
+					t.Errorf("lookup during reload: got %+v, want %+v", got, want)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

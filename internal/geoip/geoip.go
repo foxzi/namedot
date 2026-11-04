@@ -10,7 +10,7 @@ import (
     "os"
     "path/filepath"
     "strings"
-    "sync/atomic"
+    "sync"
     "time"
 
     geoip2 "github.com/oschwald/geoip2-golang"
@@ -83,14 +83,30 @@ func continentFromCountry(countryCode string) string {
     return ""
 }
 
+// readerSet holds the databases loaded by one load pass.
+// The same reader may occupy several slots.
+type readerSet struct {
+    country4, country6, asn4, asn6 *dbReader
+}
+
+func (s readerSet) close() {
+    seen := map[*dbReader]bool{}
+    for _, r := range []*dbReader{s.country4, s.country6, s.asn4, s.asn6} {
+        if r != nil && !seen[r] {
+            seen[r] = true
+            _ = r.Close()
+        }
+    }
+}
+
 // MaxMind provider that can load Country/ASN DBs for IPv4 and IPv6, with hot-reload.
+// Lookups hold mu.RLock, so old readers are closed only after no lookup uses them.
 type maxmind struct {
     path string // file or directory
 
-    country4 atomic.Value // *dbReader
-    country6 atomic.Value // *dbReader
-    asn4     atomic.Value // *dbReader
-    asn6     atomic.Value // *dbReader
+    mu     sync.RWMutex
+    set    readerSet
+    loadMu sync.Mutex // serializes reloads from the reload and download goroutines
 }
 
 // NewFromPath loads GeoIP databases. If path is a directory, loads all .mmdb files inside.
@@ -100,122 +116,18 @@ type maxmind struct {
 func NewFromPath(path string, reload time.Duration, downloadURLs []string, downloadInterval time.Duration) (Provider, func(), error) {
     m := &maxmind{path: path}
     load := func() error {
-        // Close previous
-        for _, v := range []atomic.Value{m.country4, m.country6, m.asn4, m.asn6} {
-            if r, ok := v.Load().(*dbReader); ok && r != nil {
-                _ = r.Close()
-            }
-        }
-
-        fi, err := os.Stat(path)
+        m.loadMu.Lock()
+        defer m.loadMu.Unlock()
+        set, err := loadReaders(path)
         if err != nil {
-            return fmt.Errorf("stat %s: %w", path, err)
+            // keep serving from the previously loaded databases
+            return err
         }
-        if fi.IsDir() {
-            entries, err := os.ReadDir(path)
-            if err != nil { return err }
-            log.Printf("GeoIP: scanning directory %s for .mmdb files", path)
-            for _, e := range entries {
-                if e.IsDir() { continue }
-                if !strings.HasSuffix(strings.ToLower(e.Name()), ".mmdb") { continue }
-                full := filepath.Join(path, e.Name())
-                log.Printf("GeoIP: attempting to load %s", full)
-
-                var reader *dbReader
-                var dbType string
-
-                // Try geoip2 first (for MaxMind databases)
-                if geoip2Reader, err := geoip2.Open(full); err == nil {
-                    dbType = strings.ToLower(geoip2Reader.Metadata().DatabaseType)
-                    reader = &dbReader{geoip2Reader: geoip2Reader, dbType: dbType}
-                    log.Printf("GeoIP: opened %s as geoip2 (type: %s)", e.Name(), dbType)
-                } else {
-                    // Try maxminddb for other formats (like dbip)
-                    if rawReader, err := maxminddb.Open(full); err == nil {
-                        dbType = strings.ToLower(rawReader.Metadata.DatabaseType)
-                        reader = &dbReader{rawReader: rawReader, dbType: dbType}
-                        log.Printf("GeoIP: opened %s as maxminddb (type: %s)", e.Name(), dbType)
-                    } else {
-                        log.Printf("GeoIP: failed to open %s: %v", full, err)
-                        continue
-                    }
-                }
-
-                name := strings.ToLower(e.Name())
-                // Detect IPv6 hint in filename: ipv6, -6, _6, -v6, .6.mmdb
-                is6Hint := strings.Contains(name, "ipv6") || strings.Contains(name, "-6") ||
-                           strings.Contains(name, "_6") || strings.Contains(name, "-v6") ||
-                           strings.HasSuffix(name, "6.mmdb")
-
-                // Detect database type from metadata and filename
-                isASN := strings.Contains(dbType, "asn") || strings.Contains(name, "asn")
-                // Treat City DBs as valid sources for country/continent selection
-                isCountry := strings.Contains(dbType, "country") || strings.Contains(name, "country") ||
-                    strings.Contains(dbType, "city") || strings.Contains(name, "city")
-
-                log.Printf("GeoIP: file %s - is6Hint=%v, isASN=%v, isCountry=%v", e.Name(), is6Hint, isASN, isCountry)
-
-                if isASN {
-                    if is6Hint {
-                        m.asn6.Store(reader)
-                        log.Printf("GeoIP: loaded ASN IPv6 DB %s", full)
-                    } else {
-                        m.asn4.Store(reader)
-                        log.Printf("GeoIP: loaded ASN IPv4 DB %s", full)
-                    }
-                } else if isCountry {
-                    if is6Hint {
-                        m.country6.Store(reader)
-                        log.Printf("GeoIP: loaded Country IPv6 DB %s", full)
-                    } else {
-                        m.country4.Store(reader)
-                        log.Printf("GeoIP: loaded Country IPv4 DB %s", full)
-                    }
-                } else {
-                    log.Printf("GeoIP: skipping unknown database type %s (file: %s)", dbType, e.Name())
-                }
-            }
-            // Universal MMDB (IPVersion=6) supports both IPv4+IPv6
-            // Use loaded DBs as fallback for missing IP version
-            if m.country4.Load() == nil && m.country6.Load() != nil {
-                m.country4.Store(m.country6.Load())
-                log.Printf("GeoIP: using IPv6 Country DB as fallback for IPv4")
-            }
-            if m.country6.Load() == nil && m.country4.Load() != nil {
-                m.country6.Store(m.country4.Load())
-                log.Printf("GeoIP: using IPv4 Country DB as fallback for IPv6")
-            }
-            if m.asn4.Load() == nil && m.asn6.Load() != nil {
-                m.asn4.Store(m.asn6.Load())
-                log.Printf("GeoIP: using IPv6 ASN DB as fallback for IPv4")
-            }
-            if m.asn6.Load() == nil && m.asn4.Load() != nil {
-                m.asn6.Store(m.asn4.Load())
-                log.Printf("GeoIP: using IPv4 ASN DB as fallback for IPv6")
-            }
-            // if none loaded, error
-            if m.country4.Load() == nil && m.country6.Load() == nil && m.asn4.Load() == nil && m.asn6.Load() == nil {
-                return errors.New("no geoip databases loaded")
-            }
-        } else {
-            // Single file mode
-            var reader *dbReader
-            var dbType string
-            if geoip2Reader, err := geoip2.Open(path); err == nil {
-                dbType = strings.ToLower(geoip2Reader.Metadata().DatabaseType)
-                reader = &dbReader{geoip2Reader: geoip2Reader, dbType: dbType}
-                log.Printf("GeoIP: loaded geoip2 DB %s for IPv4/IPv6 (type: %s)", path, dbType)
-            } else if rawReader, err := maxminddb.Open(path); err == nil {
-                dbType = strings.ToLower(rawReader.Metadata.DatabaseType)
-                reader = &dbReader{rawReader: rawReader, dbType: dbType}
-                log.Printf("GeoIP: loaded maxminddb DB %s for IPv4/IPv6 (type: %s)", path, dbType)
-            } else {
-                return fmt.Errorf("open %s: %w", path, err)
-            }
-            // Use as both country4 and country6
-            m.country4.Store(reader)
-            m.country6.Store(reader)
-        }
+        m.mu.Lock()
+        old := m.set
+        m.set = set
+        m.mu.Unlock()
+        old.close()
         return nil
     }
 
@@ -298,30 +210,157 @@ func NewFromPath(path string, reload time.Duration, downloadURLs []string, downl
     return m, func() { close(stop) }, nil
 }
 
+// loadReaders opens the databases at path. If path is a directory, all .mmdb files
+// inside are loaded; otherwise path is a single Country DB used for both families.
+func loadReaders(path string) (readerSet, error) {
+    var s readerSet
+    fi, err := os.Stat(path)
+    if err != nil {
+        return s, fmt.Errorf("stat %s: %w", path, err)
+    }
+    if fi.IsDir() {
+        entries, err := os.ReadDir(path)
+        if err != nil { return s, err }
+        log.Printf("GeoIP: scanning directory %s for .mmdb files", path)
+        for _, e := range entries {
+            if e.IsDir() { continue }
+            if !strings.HasSuffix(strings.ToLower(e.Name()), ".mmdb") { continue }
+            full := filepath.Join(path, e.Name())
+            log.Printf("GeoIP: attempting to load %s", full)
+
+            var reader *dbReader
+            var dbType string
+
+            // Try geoip2 first (for MaxMind databases)
+            if geoip2Reader, err := geoip2.Open(full); err == nil {
+                dbType = strings.ToLower(geoip2Reader.Metadata().DatabaseType)
+                reader = &dbReader{geoip2Reader: geoip2Reader, dbType: dbType}
+                log.Printf("GeoIP: opened %s as geoip2 (type: %s)", e.Name(), dbType)
+            } else {
+                // Try maxminddb for other formats (like dbip)
+                if rawReader, err := maxminddb.Open(full); err == nil {
+                    dbType = strings.ToLower(rawReader.Metadata.DatabaseType)
+                    reader = &dbReader{rawReader: rawReader, dbType: dbType}
+                    log.Printf("GeoIP: opened %s as maxminddb (type: %s)", e.Name(), dbType)
+                } else {
+                    log.Printf("GeoIP: failed to open %s: %v", full, err)
+                    continue
+                }
+            }
+
+            name := strings.ToLower(e.Name())
+            // Detect IPv6 hint in filename: ipv6, -6, _6, -v6, .6.mmdb
+            is6Hint := strings.Contains(name, "ipv6") || strings.Contains(name, "-6") ||
+                       strings.Contains(name, "_6") || strings.Contains(name, "-v6") ||
+                       strings.HasSuffix(name, "6.mmdb")
+
+            // Detect database type from metadata and filename
+            isASN := strings.Contains(dbType, "asn") || strings.Contains(name, "asn")
+            // Treat City DBs as valid sources for country/continent selection
+            isCountry := strings.Contains(dbType, "country") || strings.Contains(name, "country") ||
+                strings.Contains(dbType, "city") || strings.Contains(name, "city")
+
+            log.Printf("GeoIP: file %s - is6Hint=%v, isASN=%v, isCountry=%v", e.Name(), is6Hint, isASN, isCountry)
+
+            if isASN {
+                if is6Hint {
+                    replaceReader(&s.asn6, reader)
+                    log.Printf("GeoIP: loaded ASN IPv6 DB %s", full)
+                } else {
+                    replaceReader(&s.asn4, reader)
+                    log.Printf("GeoIP: loaded ASN IPv4 DB %s", full)
+                }
+            } else if isCountry {
+                if is6Hint {
+                    replaceReader(&s.country6, reader)
+                    log.Printf("GeoIP: loaded Country IPv6 DB %s", full)
+                } else {
+                    replaceReader(&s.country4, reader)
+                    log.Printf("GeoIP: loaded Country IPv4 DB %s", full)
+                }
+            } else {
+                log.Printf("GeoIP: skipping unknown database type %s (file: %s)", dbType, e.Name())
+                _ = reader.Close()
+            }
+        }
+        // Universal MMDB (IPVersion=6) supports both IPv4+IPv6
+        // Use loaded DBs as fallback for missing IP version
+        if s.country4 == nil && s.country6 != nil {
+            s.country4 = s.country6
+            log.Printf("GeoIP: using IPv6 Country DB as fallback for IPv4")
+        }
+        if s.country6 == nil && s.country4 != nil {
+            s.country6 = s.country4
+            log.Printf("GeoIP: using IPv4 Country DB as fallback for IPv6")
+        }
+        if s.asn4 == nil && s.asn6 != nil {
+            s.asn4 = s.asn6
+            log.Printf("GeoIP: using IPv6 ASN DB as fallback for IPv4")
+        }
+        if s.asn6 == nil && s.asn4 != nil {
+            s.asn6 = s.asn4
+            log.Printf("GeoIP: using IPv4 ASN DB as fallback for IPv6")
+        }
+        // if none loaded, error
+        if s.country4 == nil && s.country6 == nil && s.asn4 == nil && s.asn6 == nil {
+            return s, errors.New("no geoip databases loaded")
+        }
+    } else {
+        // Single file mode
+        var reader *dbReader
+        var dbType string
+        if geoip2Reader, err := geoip2.Open(path); err == nil {
+            dbType = strings.ToLower(geoip2Reader.Metadata().DatabaseType)
+            reader = &dbReader{geoip2Reader: geoip2Reader, dbType: dbType}
+            log.Printf("GeoIP: loaded geoip2 DB %s for IPv4/IPv6 (type: %s)", path, dbType)
+        } else if rawReader, err := maxminddb.Open(path); err == nil {
+            dbType = strings.ToLower(rawReader.Metadata.DatabaseType)
+            reader = &dbReader{rawReader: rawReader, dbType: dbType}
+            log.Printf("GeoIP: loaded maxminddb DB %s for IPv4/IPv6 (type: %s)", path, dbType)
+        } else {
+            return s, fmt.Errorf("open %s: %w", path, err)
+        }
+        // Use as both country4 and country6
+        s.country4 = reader
+        s.country6 = reader
+    }
+    return s, nil
+}
+
+// replaceReader stores r in slot, closing a reader a previous file put there.
+func replaceReader(slot **dbReader, r *dbReader) {
+    if *slot != nil {
+        _ = (*slot).Close()
+    }
+    *slot = r
+}
+
 func (m *maxmind) readerFor(ip netip.Addr, which string) *dbReader {
     v6 := ip.Is6()
     switch which {
     case "country":
         if v6 {
-            if r, _ := m.country6.Load().(*dbReader); r != nil { return r }
-            if r, _ := m.country4.Load().(*dbReader); r != nil { return r }
+            if r := m.set.country6; r != nil { return r }
+            if r := m.set.country4; r != nil { return r }
         } else {
-            if r, _ := m.country4.Load().(*dbReader); r != nil { return r }
-            if r, _ := m.country6.Load().(*dbReader); r != nil { return r }
+            if r := m.set.country4; r != nil { return r }
+            if r := m.set.country6; r != nil { return r }
         }
     case "asn":
         if v6 {
-            if r, _ := m.asn6.Load().(*dbReader); r != nil { return r }
-            if r, _ := m.asn4.Load().(*dbReader); r != nil { return r }
+            if r := m.set.asn6; r != nil { return r }
+            if r := m.set.asn4; r != nil { return r }
         } else {
-            if r, _ := m.asn4.Load().(*dbReader); r != nil { return r }
-            if r, _ := m.asn6.Load().(*dbReader); r != nil { return r }
+            if r := m.set.asn4; r != nil { return r }
+            if r := m.set.asn6; r != nil { return r }
         }
     }
     return nil
 }
 
 func (m *maxmind) Lookup(ip netip.Addr) Info {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
     var info Info
     nip := ip.AsSlice()
 
