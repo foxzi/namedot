@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"testing"
@@ -35,9 +36,13 @@ func TestSelectGeoRecords(t *testing.T) {
 func strPtr(s string) *string { return &s }
 
 // cacheWriter verifies that cached response gets current query ID
-type cacheWriter struct{ wrote *uint16 }
+type cacheWriter struct {
+	wrote *uint16
+	msg   *dns.Msg
+}
 
 func (cw *cacheWriter) WriteMsg(m *dns.Msg) error {
+	cw.msg = m
 	if cw.wrote != nil {
 		*cw.wrote = m.Id
 	}
@@ -337,5 +342,29 @@ func TestFindZone_LabelBoundary(t *testing.T) {
 	}
 	if z := findZone(zones, "ample.com."); z == nil || z.Name != "ample.com." {
 		t.Fatalf("apex must match its zone, got %+v", z)
+	}
+}
+
+func TestServeDNS_TruncatesLargeUDPAnswer(t *testing.T) {
+	s, db := newTestServer(t)
+	z := dbm.Zone{Name: "example.com."}
+	db.Create(&z)
+	var recs []dbm.RData
+	for i := 1; i <= 60; i++ {
+		recs = append(recs, dbm.RData{Data: fmt.Sprintf("192.0.2.%d", i)})
+	}
+	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "big.example.com.", Type: "A", TTL: 60, Records: recs})
+
+	req := new(dns.Msg)
+	req.SetQuestion("big.example.com.", dns.TypeA)
+	for i := 0; i < 2; i++ { // second pass is served from the cache
+		w := &cacheWriter{}
+		s.serveDNS(w, req)
+		if w.msg == nil || !w.msg.Truncated {
+			t.Fatalf("pass %d: expected truncated UDP answer", i)
+		}
+		if w.msg.Len() > dns.MinMsgSize {
+			t.Fatalf("pass %d: answer is %d bytes, limit %d", i, w.msg.Len(), dns.MinMsgSize)
+		}
 	}
 }

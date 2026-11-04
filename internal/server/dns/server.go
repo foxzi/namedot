@@ -148,7 +148,7 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 			// Update transaction ID and question to match current request
 			resp.Id = r.Id
 			resp.Question = r.Question
-			_ = w.WriteMsg(resp)
+			writeMsg(w, r, resp)
 			return
 		}
 	}
@@ -162,7 +162,7 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 			log.Printf("DNS QUERY q=%s type=%s from=%s answers=%d ttl=%d id=%d", q.Name, dns.TypeToString[q.Qtype], w.RemoteAddr(), len(answers), ttl, r.Id)
 		}
 		m.Answer = answers
-		_ = w.WriteMsg(m)
+		writeMsg(w, r, m)
 		if ttl > 0 {
 			// Store a copy in cache to avoid mutating original
 			s.cache.Set(key, m.Copy(), time.Duration(ttl)*time.Second)
@@ -193,6 +193,23 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	_ = w.WriteMsg(m)
 	// Cache local negative responses (no zone found) with short TTL to prevent repeated lookups
 	s.cache.Set(key, m.Copy(), 5*time.Minute)
+}
+
+// writeMsg sends m, truncating UDP answers to the client buffer size (512 bytes
+// without EDNS0) so the client sees the TC flag and retries over TCP.
+// m itself is left intact because it may be stored in the cache.
+func writeMsg(w dns.ResponseWriter, r, m *dns.Msg) {
+	if _, ok := w.RemoteAddr().(*net.UDPAddr); ok {
+		size := dns.MinMsgSize
+		if opt := r.IsEdns0(); opt != nil {
+			size = int(opt.UDPSize())
+		}
+		if m.Len() > size {
+			m = m.Copy()
+			m.Truncate(size)
+		}
+	}
+	_ = w.WriteMsg(m)
 }
 
 // lookup resolves a question from DB applying Geo selection.
