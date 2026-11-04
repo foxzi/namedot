@@ -677,6 +677,20 @@ func (s *Server) applyTemplate(c *gin.Context) {
 	// Extract domain from zone name
 	domain := strings.TrimSuffix(zone.Name, ".")
 
+	// Validate all records first so a bad one does not leave the zone half-applied
+	for _, tplRec := range template.Records {
+		rec := db.RData{
+			Data:      strings.ReplaceAll(tplRec.Data, "{domain}", domain),
+			Country:   tplRec.Country,
+			Continent: tplRec.Continent,
+			Subnet:    tplRec.Subnet,
+		}
+		if err := db.ValidateRData(tplRec.Type, rec); err != nil {
+			c.String(http.StatusBadRequest, `<div class="error">`+he(err.Error())+`</div>`)
+			return
+		}
+	}
+
 	// Apply each template record
 	for _, tplRec := range template.Records {
 		// Replace placeholders

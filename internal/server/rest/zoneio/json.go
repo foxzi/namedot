@@ -86,6 +86,9 @@ func ImportJSON(db *gorm.DB, dst *dbm.Zone, src *dbm.Zone, mode string, defaultT
             }
             rs.Name = normalizedName
             rs.Type = strings.ToUpper(rs.Type)
+            if err := dbm.ValidateRRSet(rs); err != nil {
+                return fmt.Errorf("rrset %s %s: %w", rs.Name, rs.Type, err)
+            }
             if rs.TTL == 0 && defaultTTL > 0 {
                 rs.TTL = defaultTTL
             }

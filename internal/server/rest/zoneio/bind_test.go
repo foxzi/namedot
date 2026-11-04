@@ -97,7 +97,7 @@ func TestImportJSON_Replace_RemovesMissingRRSet(t *testing.T) {
     // initial zone with A and MX
     initial := dbm.Zone{RRSets: []dbm.RRSet{
         {Name: "example4.com.", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "192.0.2.10"}}},
-        {Name: "example4.com.", Type: "MX", TTL: 300, Records: []dbm.RData{{Data: "mail.example4.com."}}},
+        {Name: "example4.com.", Type: "MX", TTL: 300, Records: []dbm.RData{{Data: "10 mail.example4.com."}}},
     }}
     if err := ImportJSON(db, &z, &initial, "replace", 0); err != nil {
         t.Fatalf("seed import: %v", err)
@@ -224,5 +224,30 @@ func TestImportBIND_ParseErrorKeepsZone(t *testing.T) {
     }
     if len(names) != 1 || names[0] != "www.parse-error.test." {
         t.Fatalf("zone must stay unchanged after failed import, got %v", names)
+    }
+}
+
+func TestImportJSON_InvalidDataKeepsZone(t *testing.T) {
+    db := newTestDB(t)
+    z := dbm.Zone{Name: "example6.com"}
+    if err := db.Create(&z).Error; err != nil {
+        t.Fatalf("create zone: %v", err)
+    }
+    seed := dbm.Zone{RRSets: []dbm.RRSet{
+        {Name: "example6.com.", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "192.0.2.10"}}},
+    }}
+    if err := ImportJSON(db, &z, &seed, "replace", 0); err != nil {
+        t.Fatalf("seed import: %v", err)
+    }
+    bad := dbm.Zone{RRSets: []dbm.RRSet{
+        {Name: "www.example6.com.", Type: "A", TTL: 300, Records: []dbm.RData{{Data: "not-an-ip"}}},
+    }}
+    if err := ImportJSON(db, &z, &bad, "replace", 0); err == nil {
+        t.Fatal("expected error for invalid A data")
+    }
+    var count int64
+    db.Model(&dbm.RRSet{}).Where("zone_id = ?", z.ID).Count(&count)
+    if count != 1 {
+        t.Fatalf("zone must stay intact after failed import, got %d rrsets", count)
     }
 }

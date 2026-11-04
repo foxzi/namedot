@@ -77,6 +77,13 @@ func TestCreateRRSet(t *testing.T) {
 			description: "Should create A record with FQDN",
 		},
 		{
+			name:           "reject invalid A data",
+			zoneID:         "1",
+			payload:        `{"name":"bad","type":"A","ttl":300,"records":[{"data":"not-an-ip"}]}`,
+			expectedStatus: http.StatusBadRequest,
+			description:    "Should reject data that is not a valid IPv4 address",
+		},
+		{
 			name:           "create AAAA record",
 			zoneID:         "1",
 			payload:        `{"name":"ipv6","type":"AAAA","ttl":300,"records":[{"data":"2001:db8::1"}]}`,

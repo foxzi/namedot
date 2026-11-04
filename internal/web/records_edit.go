@@ -238,6 +238,10 @@ func (s *Server) updateRecord(c *gin.Context) {
 	record.Continent = stringPtr(continent)
 	record.ASN = intPtr(asn)
 	record.Subnet = stringPtr(subnet)
+	if err := db.ValidateRData(rrset.Type, record); err != nil {
+		c.String(http.StatusBadRequest, `<div class="error">`+he(err.Error())+`</div>`)
+		return
+	}
 
 	if err := s.db.Save(&record).Error; err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error updating record: %s"), he(err.Error())))

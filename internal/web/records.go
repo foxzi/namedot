@@ -360,6 +360,21 @@ func (s *Server) createRecord(c *gin.Context) {
 		}
 	}
 
+	if strings.EqualFold(recType, "MX") {
+		data = combineMXData(data, mxPriority, zone.Name)
+	}
+	record := db.RData{
+		Data:      data,
+		Country:   stringPtr(country),
+		Continent: stringPtr(continent),
+		ASN:       intPtr(asn),
+		Subnet:    stringPtr(subnet),
+	}
+	if err := db.ValidateRData(recType, record); err != nil {
+		c.String(http.StatusBadRequest, `<div class="error">`+he(err.Error())+`</div>`)
+		return
+	}
+
 	// Find or create RRSet
 	var rrset db.RRSet
 	result := s.db.Where("zone_id = ? AND name = ? AND type = ?", zoneID, name, recType).First(&rrset)
@@ -378,18 +393,7 @@ func (s *Server) createRecord(c *gin.Context) {
 	}
 
 	// Add record data
-	if strings.EqualFold(recType, "MX") {
-		data = combineMXData(data, mxPriority, zone.Name)
-	}
-	record := db.RData{
-		RRSetID:   rrset.ID,
-		Data:      data,
-		Country:   stringPtr(country),
-		Continent: stringPtr(continent),
-		ASN:       intPtr(asn),
-		Subnet:    stringPtr(subnet),
-	}
-
+	record.RRSetID = rrset.ID
 	if err := s.db.Create(&record).Error; err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error creating record: %s"), he(err.Error())))
 		return

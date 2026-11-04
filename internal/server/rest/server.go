@@ -391,6 +391,10 @@ func (s *Server) createRRSet(c *gin.Context) {
 			}
 		}
 	}
+	if err := dbm.ValidateRRSet(set); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if err := s.db.Create(&set).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -425,18 +429,22 @@ func (s *Server) updateRRSet(c *gin.Context) {
 	if set.TTL == 0 && s.cfg.DefaultTTL > 0 {
 		set.TTL = s.cfg.DefaultTTL
 	}
+	set.Records = req.recordsNormalized()
+	if strings.EqualFold(set.Type, "CNAME") {
+		for i := range set.Records {
+			if strings.TrimSpace(set.Records[i].Data) == "@" {
+				set.Records[i].Data = fqdn("@", z.Name)
+			}
+		}
+	}
+	if err := dbm.ValidateRRSet(set); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	// replace records
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("rr_set_id = ?", set.ID).Delete(&dbm.RData{}).Error; err != nil {
 			return err
-		}
-		set.Records = req.recordsNormalized()
-		if strings.EqualFold(set.Type, "CNAME") {
-			for i := range set.Records {
-				if strings.TrimSpace(set.Records[i].Data) == "@" {
-					set.Records[i].Data = fqdn("@", z.Name)
-				}
-			}
 		}
 		return tx.Save(&set).Error
 	}); err != nil {
