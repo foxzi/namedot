@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"namedot/internal/config"
+	"namedot/internal/db"
 )
 
 func newTestWebWithPasswordHash(t *testing.T, hash string, tlsEnabled bool) (*Server, *gin.Engine) {
@@ -330,5 +332,53 @@ func TestListZones_EscapesSearch(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;img src=x") {
 		t.Fatalf("expected escaped payload in body: %s", body)
+	}
+}
+
+func TestUpdateRecord_IgnoresFormIDs(t *testing.T) {
+	s, r := newTestWebWithPasswordHash(t, "", false)
+	sid := "sess"
+	setTestSession(s, sid, &Session{
+		Username:  "admin",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Hour),
+		CSRFToken: "csrf",
+	})
+
+	own := db.Zone{Name: "own.test.", RRSets: []db.RRSet{{Name: "www.own.test.", Type: "A", TTL: 300, Records: []db.RData{{Data: "192.0.2.1"}}}}}
+	other := db.Zone{Name: "other.test.", RRSets: []db.RRSet{{Name: "www.other.test.", Type: "A", TTL: 300}}}
+	for _, z := range []*db.Zone{&own, &other} {
+		if err := s.db.Create(z).Error; err != nil {
+			t.Fatalf("create zone: %v", err)
+		}
+	}
+	recID := own.RRSets[0].Records[0].ID
+	form := url.Values{
+		"data":     {"192.0.2.2"},
+		"ttl":      {"999"},
+		"zone_id":  {strconv.Itoa(int(other.ID))},
+		"rrset_id": {strconv.Itoa(int(other.RRSets[0].ID))},
+	}
+	req := httptest.NewRequest("PUT", "/admin/records/"+strconv.Itoa(int(recID)), strings.NewReader(form.Encode()))
+	req.Host = "example.com"
+	req.AddCookie(&http.Cookie{Name: "session", Value: sid, Path: "/admin"})
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("X-CSRF-Token", "csrf")
+	req.Header.Set("Origin", "http://example.com")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "own.test.") {
+		t.Fatalf("expected records list of own zone")
+	}
+	var ownSet, otherSet db.RRSet
+	s.db.First(&ownSet, own.RRSets[0].ID)
+	s.db.First(&otherSet, other.RRSets[0].ID)
+	if ownSet.TTL != 999 || otherSet.TTL != 300 {
+		t.Fatalf("TTL went to the wrong rrset: own=%d other=%d", ownSet.TTL, otherSet.TTL)
 	}
 }

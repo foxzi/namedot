@@ -125,9 +125,6 @@ func (s *Server) editRecordForm(c *gin.Context) {
                     style="width: 100%%; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px;">
             </div>
 
-			<input type="hidden" name="zone_id" value="%d">
-			<input type="hidden" name="rrset_id" value="%d">
-
             <div style="grid-column: span 2; display: flex; gap: 1rem;">
                 <button type="submit" class="btn">%s</button>
                 <button type="button" class="btn" style="background: #718096;"
@@ -162,8 +159,6 @@ func (s *Server) editRecordForm(c *gin.Context) {
 		asn,
 		s.tr(c, "Subnet"),
 		he(subnet),
-		rrset.ZoneID,
-		rrset.ID,
 		s.tr(c, "Update Record"),
 		rrset.ZoneID,
 		s.tr(c, "Cancel"),
@@ -194,9 +189,6 @@ func (s *Server) updateRecord(c *gin.Context) {
 	asnStr := c.PostForm("asn")
 	subnet := c.PostForm("subnet")
 	mxPriorityStr := c.PostForm("mx_priority")
-	zoneIDStr := c.PostForm("zone_id")
-	rrsetIDStr := c.PostForm("rrset_id")
-	zoneIDParsed, _ := strconv.ParseUint(zoneIDStr, 10, 32)
 
 	if data == "" {
 		c.String(http.StatusBadRequest, `<div class="error">`+s.tr(c, "Data is required")+`</div>`)
@@ -220,21 +212,24 @@ func (s *Server) updateRecord(c *gin.Context) {
 		}
 	}
 
-	// If this RRSet is CNAME and data is "@", store apex FQDN
+	// RRSet and zone come from the record itself, not from form fields
 	var rrset db.RRSet
+	if err := s.db.First(&rrset, record.RRSetID).Error; err != nil {
+		c.String(http.StatusNotFound, s.tr(c, "RRSet not found"))
+		return
+	}
 	var zone db.Zone
-	rrsetID, _ := strconv.ParseUint(rrsetIDStr, 10, 32)
-	if err := s.db.First(&rrset, rrsetID).Error; err == nil {
-		_ = s.db.First(&zone, rrset.ZoneID).Error
-		if strings.EqualFold(rrset.Type, "CNAME") && strings.TrimSpace(data) == "@" {
-			// Need zone name for apex
-			if zone.ID != 0 {
-				data = toFQDN("@", zone.Name)
-			}
-		}
-		if strings.EqualFold(rrset.Type, "MX") {
-			data = combineMXData(data, mxPriority, zone.Name)
-		}
+	if err := s.db.First(&zone, rrset.ZoneID).Error; err != nil {
+		c.String(http.StatusNotFound, s.tr(c, "Zone not found"))
+		return
+	}
+
+	// If this RRSet is CNAME and data is "@", store apex FQDN
+	if strings.EqualFold(rrset.Type, "CNAME") && strings.TrimSpace(data) == "@" {
+		data = toFQDN("@", zone.Name)
+	}
+	if strings.EqualFold(rrset.Type, "MX") {
+		data = combineMXData(data, mxPriority, zone.Name)
 	}
 
 	// Update record data
@@ -250,23 +245,19 @@ func (s *Server) updateRecord(c *gin.Context) {
 	}
 
 	// Update RRSet TTL if changed
-	if err := s.db.First(&rrset, rrsetID).Error; err == nil {
-		if uint32(ttl) != rrset.TTL {
-			rrset.TTL = uint32(ttl)
-			if err := s.db.Save(&rrset).Error; err != nil {
-				c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error updating TTL: %s"), he(err.Error())))
-				return
-			}
+	if uint32(ttl) != rrset.TTL {
+		rrset.TTL = uint32(ttl)
+		if err := s.db.Save(&rrset).Error; err != nil {
+			c.String(http.StatusInternalServerError, fmt.Sprintf(s.tr(c, "Error updating TTL: %s"), he(err.Error())))
+			return
 		}
 	}
 
 	// Ensure SOA exists/updated after change
-	if err := s.db.First(&zone, zoneIDParsed).Error; err == nil {
-		db.BumpSOASerialAuto(s.db, zone, s.cfg.SOA.AutoOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
-	}
+	db.BumpSOASerialAuto(s.db, zone, s.cfg.SOA.AutoOnMissing, s.cfg.SOA.Primary, s.cfg.SOA.Hostmaster)
 
-	// Return updated records list
-	c.Params = append(c.Params, gin.Param{Key: "id", Value: fmt.Sprintf("%d", zoneIDParsed)})
+	// Return updated records list; the route "id" param is the record ID, replace it with the zone ID
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", zone.ID)}}
 	s.listRecords(c)
 }
 
