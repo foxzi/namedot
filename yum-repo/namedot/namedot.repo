@@ -1,0 +1,5 @@
+[namedot]
+name=namedot Repository
+baseurl=https://$GITHUB_REPOSITORY_OWNER.github.io/namedot/yum-repo/namedot/stable/$basearch
+enabled=1
+gpgcheck=0
