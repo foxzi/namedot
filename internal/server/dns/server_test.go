@@ -62,7 +62,7 @@ func TestCacheResponse_UsesCurrentID(t *testing.T) {
 	old := new(dns.Msg)
 	old.SetReply(&dns.Msg{MsgHdr: dns.MsgHdr{Id: 111}})
 	old.Question = []dns.Question{{Name: "www.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}
-	s.cache.Set("www.example.com.|1|", old, time.Minute)
+	s.cache.Set("www.example.com.|1|", &cacheEntry{msg: old}, time.Minute)
 
 	// Incoming query with new ID
 	req := new(dns.Msg)
@@ -125,7 +125,7 @@ func TestLookup_Wildcard_A(t *testing.T) {
 	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "*.example.com.", Type: "A", TTL: 60, Records: []dbm.RData{{Data: "192.0.2.99"}}})
 
 	q := dns.Question{Name: "anything.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans, ttl, rule, err := s.lookup(new(dns.Msg), q, netip.Addr{})
+	ans, ttl, rule, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestLookup_Wildcard_ExactMatchWins(t *testing.T) {
 
 	// Exact match should win
 	q := dns.Question{Name: "www.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans, ttl, rule, err := s.lookup(new(dns.Msg), q, netip.Addr{})
+	ans, ttl, rule, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestLookup_Wildcard_ExactMatchWins(t *testing.T) {
 
 	// Other name should match wildcard
 	q2 := dns.Question{Name: "other.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans2, _, rule2, err := s.lookup(new(dns.Msg), q2, netip.Addr{})
+	ans2, _, rule2, _, err := s.lookup(new(dns.Msg), q2, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestLookup_Wildcard_MultiLevel(t *testing.T) {
 
 	// foo.bar.example.com -> *.bar.example.com (more specific)
 	q := dns.Question{Name: "foo.bar.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans, _, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
+	ans, _, _, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestLookup_Wildcard_MultiLevel(t *testing.T) {
 
 	// foo.baz.example.com -> *.example.com (less specific)
 	q2 := dns.Question{Name: "foo.baz.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans2, _, _, err := s.lookup(new(dns.Msg), q2, netip.Addr{})
+	ans2, _, _, _, err := s.lookup(new(dns.Msg), q2, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestLookup_Wildcard_CNAME(t *testing.T) {
 	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "*.example.com.", Type: "CNAME", TTL: 120, Records: []dbm.RData{{Data: "fallback.example.net."}}})
 
 	q := dns.Question{Name: "anything.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans, _, rule, err := s.lookup(new(dns.Msg), q, netip.Addr{})
+	ans, _, rule, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestLookup_Wildcard_ZoneApex_NoMatch(t *testing.T) {
 	db.Create(&dbm.RRSet{ZoneID: z.ID, Name: "*.example.com.", Type: "A", TTL: 60, Records: []dbm.RData{{Data: "192.0.2.99"}}})
 
 	q := dns.Question{Name: "example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	_, _, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
+	_, _, _, _, err := s.lookup(new(dns.Msg), q, netip.Addr{})
 	if err == nil {
 		t.Fatalf("zone apex should not match wildcard")
 	}
@@ -262,7 +262,7 @@ func TestLookup_Wildcard_GeoDNS(t *testing.T) {
 	// With country info -> should select country record
 	s.geo = &mockGeo{info: geoip.Info{Country: "US"}}
 	q := dns.Question{Name: "test.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
-	ans, _, rule, err := s.lookup(new(dns.Msg), q, netip.MustParseAddr("203.0.113.1"))
+	ans, _, rule, _, err := s.lookup(new(dns.Msg), q, netip.MustParseAddr("203.0.113.1"))
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestLookup_CNAME_Fallback(t *testing.T) {
 	// Query A foo.example.com. should return CNAME rrset
 	q := dns.Question{Name: "foo.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
 	msg := new(dns.Msg)
-	ans, ttl, _, err := s.lookup(msg, q, netip.Addr{})
+	ans, ttl, _, _, err := s.lookup(msg, q, netip.Addr{})
 	if err != nil {
 		t.Fatalf("lookup err: %v", err)
 	}

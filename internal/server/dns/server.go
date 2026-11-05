@@ -120,7 +120,13 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if s.cfg != nil {
 		useECS = s.cfg.GeoIP.UseECS
 	}
-	cip := clientIPFrom(r, w, useECS)
+	ecs, ok := requestECS(r, useECS)
+	if !ok {
+		m.Rcode = dns.RcodeFormatError
+		_ = w.WriteMsg(withOPT(r, m, nil, false))
+		return
+	}
+	cip := clientIPFrom(w, ecs)
 	prov := s.geo
 	if prov == nil {
 		prov = geoip.NewNoop()
@@ -142,19 +148,20 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 	key := fmt.Sprintf("%s|%d|%s", strings.ToLower(q.Name), q.Qtype, cacheScope)
 	if v, ok := s.cache.Get(key); ok {
-		if cached, ok2 := v.(*dns.Msg); ok2 {
+		if entry, ok2 := v.(*cacheEntry); ok2 {
+			cached := entry.msg
 			log.Printf("DNS QUERY cache-hit q=%s type=%s from=%s%s id=%d", q.Name, dns.TypeToString[q.Qtype], w.RemoteAddr(), geoStr, r.Id)
 			resp := cached.Copy()
 			// Update transaction ID and question to match current request
 			resp.Id = r.Id
 			resp.Question = r.Question
-			writeMsg(w, r, resp)
+			writeMsg(w, r, withOPT(r, resp, ecs, entry.geo))
 			return
 		}
 	}
 
 	// Resolve locally
-	answers, ttl, rule, err := s.lookup(r, q, cip)
+	answers, ttl, rule, geo, err := s.lookup(r, q, cip)
 	if err == nil && len(answers) > 0 {
 		if verbose {
 			log.Printf("DNS QUERY q=%s type=%s from=%s ecs=%s%s rule=%s answers=%d ttl=%d id=%d", q.Name, dns.TypeToString[q.Qtype], w.RemoteAddr(), cip, geoStr, rule, len(answers), ttl, r.Id)
@@ -162,10 +169,10 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 			log.Printf("DNS QUERY q=%s type=%s from=%s answers=%d ttl=%d id=%d", q.Name, dns.TypeToString[q.Qtype], w.RemoteAddr(), len(answers), ttl, r.Id)
 		}
 		m.Answer = answers
-		writeMsg(w, r, m)
+		writeMsg(w, r, withOPT(r, m, ecs, geo))
 		if ttl > 0 {
 			// Store a copy in cache to avoid mutating original
-			s.cache.Set(key, m.Copy(), time.Duration(ttl)*time.Second)
+			s.cache.Set(key, &cacheEntry{msg: m.Copy(), geo: geo}, time.Duration(ttl)*time.Second)
 		}
 		return
 	}
@@ -179,9 +186,9 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 		if soa != nil {
 			m.Ns = []dns.RR{soa}
 		}
-		writeMsg(w, r, m)
+		writeMsg(w, r, withOPT(r, m, ecs, false))
 		if negTTL > 0 {
-			s.cache.Set(key, m.Copy(), time.Duration(negTTL)*time.Second)
+			s.cache.Set(key, &cacheEntry{msg: m.Copy()}, time.Duration(negTTL)*time.Second)
 		}
 		return
 	}
@@ -198,7 +205,7 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 			// Cache negative responses (NXDOMAIN, NODATA, etc.) to prevent repeated upstream queries
 			// Use a shorter TTL for negative caching (300 seconds = 5 minutes)
 			if in.Rcode != dns.RcodeSuccess {
-				s.cache.Set(key, in.Copy(), 5*time.Minute)
+				s.cache.Set(key, &cacheEntry{msg: in.Copy()}, 5*time.Minute)
 			}
 			return
 		}
@@ -206,9 +213,9 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	log.Printf("DNS QUERY nxdomain q=%s type=%s from=%s%s id=%d", q.Name, dns.TypeToString[q.Qtype], w.RemoteAddr(), geoStr, r.Id)
 	m.Rcode = dns.RcodeNameError
-	_ = w.WriteMsg(m)
+	_ = w.WriteMsg(withOPT(r, m, ecs, false))
 	// Cache local negative responses (no zone found) with short TTL to prevent repeated lookups
-	s.cache.Set(key, m.Copy(), 5*time.Minute)
+	s.cache.Set(key, &cacheEntry{msg: m.Copy()}, 5*time.Minute)
 }
 
 // zoneFor returns the zone that contains qname, or nil.
@@ -253,6 +260,38 @@ func escapeLike(s string) string {
 	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(s)
 }
 
+// cacheEntry is a cached answer; geo marks answers that depend on the client address.
+type cacheEntry struct {
+	msg *dns.Msg
+	geo bool
+}
+
+// ednsUDPSize is the UDP payload size advertised in responses (DNS flag day 2020).
+const ednsUDPSize = 1232
+
+// withOPT returns m with an OPT record when the request carried EDNS0 (RFC 6891).
+// A request ECS option is echoed back (RFC 7871): SCOPE equals SOURCE PREFIX-LENGTH
+// for geo-dependent answers and 0 for answers valid for any client.
+// m itself is left intact because it may be stored in the cache.
+func withOPT(r, m *dns.Msg, ecs *dns.EDNS0_SUBNET, geo bool) *dns.Msg {
+	if r.IsEdns0() == nil {
+		return m
+	}
+	m = m.Copy()
+	opt := &dns.OPT{Hdr: dns.RR_Header{Name: ".", Rrtype: dns.TypeOPT}}
+	opt.SetUDPSize(ednsUDPSize)
+	if ecs != nil {
+		e := *ecs
+		e.SourceScope = 0
+		if geo {
+			e.SourceScope = e.SourceNetmask
+		}
+		opt.Option = append(opt.Option, &e)
+	}
+	m.Extra = append(m.Extra, opt)
+	return m
+}
+
 // writeMsg sends m, truncating UDP answers to the client buffer size (512 bytes
 // without EDNS0) so the client sees the TC flag and retries over TCP.
 // m itself is left intact because it may be stored in the cache.
@@ -271,40 +310,41 @@ func writeMsg(w dns.ResponseWriter, r, m *dns.Msg) {
 }
 
 // lookup resolves a question from DB applying Geo selection.
-func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answers []dns.RR, ttl uint32, rule string, err error) {
+// geo reports whether the answer depends on the client address.
+func (s *Server) lookup(r *dns.Msg, q dns.Question, clientIP netip.Addr) (answers []dns.RR, ttl uint32, rule string, geo bool, err error) {
 	qname := strings.ToLower(dns.Fqdn(q.Name))
 	qtype := dns.TypeToString[q.Qtype]
 
 	// Find the best matching zone suffix (using cache)
 	zones, err := s.loadZones()
 	if err != nil {
-		return nil, 0, "", err
+		return nil, 0, "", false, err
 	}
 	zone := findZone(zones, qname)
 	if zone == nil {
-		return nil, 0, "", fmt.Errorf("no zone")
+		return nil, 0, "", false, fmt.Errorf("no zone")
 	}
 
 	zoneFQDN := dns.Fqdn(strings.ToLower(zone.Name))
 
 	// Find RRSet by FQDN name and type
-	if answers, ttl, rule, err = s.lookupExact(qname, qtype, zone, clientIP); err == nil {
-		return answers, ttl, rule, nil
+	if answers, ttl, rule, geo, err = s.lookupExact(qname, qtype, zone, clientIP); err == nil {
+		return answers, ttl, rule, geo, nil
 	}
 
 	// Wildcard fallback (RFC 4592)
 	for _, wcName := range wildcardNames(qname, zoneFQDN) {
-		if answers, ttl, rule, err = s.lookupExact(wcName, qtype, zone, clientIP); err == nil {
+		if answers, ttl, rule, geo, err = s.lookupExact(wcName, qtype, zone, clientIP); err == nil {
 			// Rewrite owner name from wildcard to original qname
 			for i, rr := range answers {
 				rr.Header().Name = qname
 				answers[i] = rr
 			}
-			return answers, ttl, "wildcard:" + rule, nil
+			return answers, ttl, "wildcard:" + rule, geo, nil
 		}
 	}
 
-	return nil, 0, "", fmt.Errorf("not found")
+	return nil, 0, "", false, fmt.Errorf("not found")
 }
 
 // loadZones returns all zones sorted by name length desc, using the zone cache.
@@ -332,7 +372,7 @@ func findZone(zones []dbm.Zone, qname string) *dbm.Zone {
 }
 
 // lookupExact tries exact name+type match, then CNAME fallback for the given name.
-func (s *Server) lookupExact(qname, qtype string, zone *dbm.Zone, clientIP netip.Addr) ([]dns.RR, uint32, string, error) {
+func (s *Server) lookupExact(qname, qtype string, zone *dbm.Zone, clientIP netip.Addr) ([]dns.RR, uint32, string, bool, error) {
 	zoneFQDN := dns.Fqdn(strings.ToLower(zone.Name))
 
 	var set dbm.RRSet
@@ -356,9 +396,9 @@ func (s *Server) lookupExact(qname, qtype string, zone *dbm.Zone, clientIP netip
 					answers = append(answers, rr)
 				}
 			}
-			return answers, cnameSet.TTL, "cname", nil
+			return answers, cnameSet.TTL, "cname", false, nil
 		}
-		return nil, 0, "", err
+		return nil, 0, "", false, err
 	}
 
 	// Geo selection
@@ -376,7 +416,17 @@ func (s *Server) lookupExact(qname, qtype string, zone *dbm.Zone, clientIP netip
 			answers = append(answers, rr)
 		}
 	}
-	return answers, set.TTL, selectedRule, nil
+	return answers, set.TTL, selectedRule, hasGeoRecords(set.Records), nil
+}
+
+// hasGeoRecords reports whether any record carries a geo condition.
+func hasGeoRecords(recs []dbm.RData) bool {
+	for _, r := range recs {
+		if r.Country != nil || r.Continent != nil || r.ASN != nil || r.Subnet != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // wildcardNames returns wildcard candidate names for a query, from most specific to least.
@@ -409,23 +459,43 @@ func wildcardNames(qname, zoneFQDN string) []string {
 	return candidates
 }
 
-func clientIPFrom(r *dns.Msg, w dns.ResponseWriter, useECS bool) netip.Addr {
-	if useECS {
-		if opt := r.IsEdns0(); opt != nil {
-			for _, o := range opt.Option {
-				if ecs, ok := o.(*dns.EDNS0_SUBNET); ok {
-					var ip net.IP
-					if ecs.Family == 1 { // IPv4
-						ip = ecs.Address.To4()
-					} else {
-						ip = ecs.Address
-					}
-					if ip != nil {
-						a, _ := netip.ParseAddr(ip.String())
-						return a
-					}
-				}
-			}
+// requestECS returns the ECS option of the request when ECS is enabled, or nil.
+// ok is false for a malformed option (RFC 7871 section 7.1.1): unknown family,
+// prefix longer than the address or address bits set beyond the prefix.
+func requestECS(r *dns.Msg, useECS bool) (ecs *dns.EDNS0_SUBNET, ok bool) {
+	opt := r.IsEdns0()
+	if !useECS || opt == nil {
+		return nil, true
+	}
+	for _, o := range opt.Option {
+		e, isECS := o.(*dns.EDNS0_SUBNET)
+		if !isECS {
+			continue
+		}
+		var addr netip.Addr
+		switch e.Family {
+		case 1:
+			addr, ok = netip.AddrFromSlice(e.Address.To4())
+		case 2:
+			addr, ok = netip.AddrFromSlice(e.Address.To16())
+		}
+		if !ok || int(e.SourceNetmask) > addr.BitLen() {
+			return nil, false
+		}
+		if netip.PrefixFrom(addr, int(e.SourceNetmask)).Masked().Addr() != addr {
+			return nil, false
+		}
+		return e, true
+	}
+	return nil, true
+}
+
+// clientIPFrom returns the ECS address, or the remote address when there is no
+// ECS or its SOURCE PREFIX-LENGTH is 0 (the client asked not to use its address).
+func clientIPFrom(w dns.ResponseWriter, ecs *dns.EDNS0_SUBNET) netip.Addr {
+	if ecs != nil && ecs.SourceNetmask > 0 {
+		if a, ok := netip.AddrFromSlice(ecs.Address); ok {
+			return a.Unmap()
 		}
 	}
 	if ra := w.RemoteAddr(); ra != nil {

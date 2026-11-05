@@ -227,7 +227,7 @@ GeoIP with Auto-Download
 - Enable in config:
   - `geoip.enabled: true`
   - `geoip.mmdb_path: <path to .mmdb file or directory>`
-  - `geoip.use_ecs: true` to honor EDNS Client Subnet
+  - `geoip.use_ecs: true` to honor EDNS Client Subnet (RFC 7871): the ECS option is echoed in the response with SCOPE equal to the source prefix for geo-dependent answers and 0 for answers valid for any client, so resolvers cache them correctly; a malformed ECS option gets FORMERR
   - `geoip.download_urls: [list of URLs]` for automatic MMDB downloads
   - `geoip.download_interval_sec: 86400` for periodic updates (24 hours)
 
@@ -646,7 +646,7 @@ CLI флаги
 - Включить в конфиге:
   - `geoip.enabled: true`
   - `geoip.mmdb_path: <путь к .mmdb файлу или директории>`
-  - `geoip.use_ecs: true` для учета EDNS Client Subnet
+  - `geoip.use_ecs: true` для учета EDNS Client Subnet (RFC 7871): опция ECS возвращается в ответе, SCOPE равен префиксу запроса для гео-зависимых ответов и 0 для ответов, одинаковых для всех клиентов, чтобы резолверы правильно их кешировали; на некорректную опцию ECS сервер отвечает FORMERR
   - `geoip.download_urls: [список URL]` для автоматического скачивания MMDB
   - `geoip.download_interval_sec: 86400` для периодических обновлений (24 часа)
 
