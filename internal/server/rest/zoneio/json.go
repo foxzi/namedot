@@ -33,6 +33,9 @@ func NormalizeRRSetName(name, zoneName string) (string, error) {
     // Handle trailing .@ (relative to zone apex)
     if strings.HasSuffix(n, ".@") {
         n = strings.TrimSuffix(n, ".@")
+        if n == "" {
+            return zoneFQDN, nil
+        }
     }
 
     var result string

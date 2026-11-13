@@ -25,10 +25,7 @@ cfg := &config.Config{
 	SOA:              config.SOAConfig{AutoOnMissing: true},
 }
 
-	gormDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	gormDB := openTestDB(t)
 
 	if err := db.AutoMigrate(gormDB); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -44,6 +41,26 @@ cfg := &config.Config{
 	server := NewServer(cfg, gormDB, mockDNS)
 
 	return server, gormDB, zone.ID
+}
+
+// openTestDB opens an in-memory SQLite database with foreign keys enabled,
+// as production DSNs do (_foreign_keys=on), so FK violations surface in tests.
+func openTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?_foreign_keys=on"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1) // one connection = one in-memory database
+	var fk int
+	if err := gormDB.Raw("PRAGMA foreign_keys").Scan(&fk).Error; err != nil || fk != 1 {
+		t.Fatalf("foreign keys not enabled (fk=%d, err=%v)", fk, err)
+	}
+	return gormDB
 }
 
 func TestCreateRRSet(t *testing.T) {
@@ -205,6 +222,38 @@ func TestCreateRRSet(t *testing.T) {
 			payload:        `{"name":"empty","type":"A","ttl":300,"records":[]}`,
 			expectedStatus: http.StatusCreated,
 			description:    "Should allow empty records array",
+		},
+		{
+			name:           "fully qualified name without trailing dot",
+			zoneID:         "1",
+			payload:        `{"name":"_dmarc.test.com","type":"TXT","ttl":300,"records":[{"data":"\"v=DMARC1; p=none\""}]}`,
+			expectedStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, rr *db.RRSet) {
+				if rr.Name != "_dmarc.test.com." {
+					t.Errorf("Expected '_dmarc.test.com.', got '%s'", rr.Name)
+				}
+			},
+			description: "Should not append the zone to a name that already ends with it",
+		},
+		{
+			name:           "absolute apex name",
+			zoneID:         "1",
+			payload:        `{"name":"test.com.","type":"TXT","ttl":300,"records":[{"data":"\"v=spf1 -all\""}]}`,
+			expectedStatus: http.StatusCreated,
+			validateResult: func(t *testing.T, rr *db.RRSet) {
+				if rr.Name != "test.com." {
+					t.Errorf("Expected 'test.com.', got '%s'", rr.Name)
+				}
+			},
+			description: "Should keep an absolute name as is",
+		},
+		{
+			name:           "absolute name outside zone",
+			zoneID:         "1",
+			payload:        `{"name":"other.org.","type":"A","ttl":300,"records":[{"data":"192.0.2.1"}]}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  `record name "other.org." does not belong to zone "test.com"`,
+			description:    "Should reject a name that does not belong to the zone",
 		},
 	}
 
@@ -598,6 +647,158 @@ func TestDeleteRRSet(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeleteRRSet_WithRecords(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server, gormDB, zoneID := setupRRSetTestServer(t)
+	mock := server.dnsServer.(*mockDNSServer)
+
+	set := db.RRSet{
+		ZoneID:  zoneID,
+		Name:    "www.test.com.",
+		Type:    "A",
+		TTL:     300,
+		Records: []db.RData{{Data: "192.0.2.1"}, {Data: "192.0.2.2"}},
+	}
+	if err := gormDB.Create(&set).Error; err != nil {
+		t.Fatalf("create rrset: %v", err)
+	}
+
+	w := doRRSetRequest(server, "DELETE", zoneID, set.ID, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var n int64
+	gormDB.Model(&db.RRSet{}).Where("id = ?", set.ID).Count(&n)
+	if n != 0 {
+		t.Errorf("rrset still exists")
+	}
+	gormDB.Model(&db.RData{}).Where("rr_set_id = ?", set.ID).Count(&n)
+	if n != 0 {
+		t.Errorf("%d records of the deleted rrset remain", n)
+	}
+	if !mock.invalidateCalled {
+		t.Errorf("DNS cache was not invalidated after delete")
+	}
+}
+
+func TestDeleteRRSet_Missing_KeepsSOAAndCache(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server, gormDB, zoneID := setupRRSetTestServer(t)
+	mock := server.dnsServer.(*mockDNSServer)
+
+	const soaData = "ns1.test.com. hostmaster.test.com. 100 7200 3600 1209600 300"
+	soa := db.RRSet{ZoneID: zoneID, Name: "test.com.", Type: "SOA", TTL: 300, Records: []db.RData{{Data: soaData}}}
+	if err := gormDB.Create(&soa).Error; err != nil {
+		t.Fatalf("create soa: %v", err)
+	}
+
+	w := doRRSetRequest(server, "DELETE", zoneID, 99999, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var rd db.RData
+	gormDB.Where("rr_set_id = ?", soa.ID).First(&rd)
+	if rd.Data != soaData {
+		t.Errorf("SOA changed on a no-op delete: %q", rd.Data)
+	}
+	if mock.invalidateCalled {
+		t.Errorf("DNS cache invalidated on a no-op delete")
+	}
+}
+
+func TestUpdateRRSet_NameRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, method := range []string{"PUT", "PATCH"} {
+		t.Run(method, func(t *testing.T) {
+			server, gormDB, zoneID := setupRRSetTestServer(t)
+			txt := func(name string) db.RRSet {
+				rs := db.RRSet{ZoneID: zoneID, Name: name, Type: "TXT", TTL: 300, Records: []db.RData{{Data: `"x"`}}}
+				if err := gormDB.Create(&rs).Error; err != nil {
+					t.Fatalf("create rrset: %v", err)
+				}
+				return rs
+			}
+			dmarc := txt("_dmarc.test.com.")
+			other := txt("other.test.com.")
+
+			// fully qualified name without the trailing dot is not doubled
+			w := doRRSetRequest(server, method, zoneID, other.ID, `{"name":"spf.test.com","type":"TXT","records":[{"data":"\"v=spf1 -all\""}]}`)
+			if w.Code != http.StatusOK {
+				t.Fatalf("rename: expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			var got db.RRSet
+			gormDB.First(&got, other.ID)
+			if got.Name != "spf.test.com." {
+				t.Errorf("expected 'spf.test.com.', got %q", got.Name)
+			}
+
+			// name outside the zone
+			w = doRRSetRequest(server, method, zoneID, other.ID, `{"name":"other.org.","type":"TXT","records":[{"data":"\"x\""}]}`)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("outside zone: expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+
+			// renaming onto an existing name+type is a conflict, not a DB error
+			w = doRRSetRequest(server, method, zoneID, other.ID, `{"name":"_dmarc","type":"TXT","records":[{"data":"\"x\""}]}`)
+			if w.Code != http.StatusConflict {
+				t.Fatalf("conflict: expected 409, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp map[string]interface{}
+			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			if resp["existing_id"] != float64(dmarc.ID) {
+				t.Errorf("expected existing_id %d, got %v", dmarc.ID, resp["existing_id"])
+			}
+
+			// keeping its own name is not a conflict
+			w = doRRSetRequest(server, method, zoneID, dmarc.ID, `{"name":"_dmarc.test.com.","type":"TXT","records":[{"data":"\"v=DMARC1; p=none\""}]}`)
+			if w.Code != http.StatusOK {
+				t.Errorf("same name: expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func doRRSetRequest(server *Server, method string, zoneID, rrsetID uint, body string) *httptest.ResponseRecorder {
+	url := "/zones/" + strconv.FormatUint(uint64(zoneID), 10) + "/rrsets/" + strconv.FormatUint(uint64(rrsetID), 10)
+	req := httptest.NewRequest(method, url, bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer testtoken")
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	w := httptest.NewRecorder()
+	server.r.ServeHTTP(w, req)
+	return w
+}
+
+func TestHealth_HEAD(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server, _, _ := setupRRSetTestServer(t)
+
+	req := httptest.NewRequest("HEAD", "/health", nil)
+	w := httptest.NewRecorder()
+	server.r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("HEAD /health: expected 200, got %d", w.Code)
+	}
+}
+
+func TestHealth_HEAD_DatabaseDown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server, gormDB, _ := setupRRSetTestServer(t)
+	sqlDB, _ := gormDB.DB()
+	_ = sqlDB.Close()
+
+	req := httptest.NewRequest("HEAD", "/health", nil)
+	w := httptest.NewRecorder()
+	server.r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("HEAD /health with DB down: expected 503, got %d", w.Code)
 	}
 }
 

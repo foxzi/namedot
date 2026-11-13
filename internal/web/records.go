@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"namedot/internal/db"
+	"namedot/internal/server/rest/zoneio"
 )
 
 // Helper functions for pointer conversion
@@ -335,12 +336,16 @@ func (s *Server) createRecord(c *gin.Context) {
 		return
 	}
 
-	// Normalize name to FQDN; handle @/empty as zone apex
-	name = toFQDN(name, zone.Name)
+	// Normalize name to FQDN (same rules as the REST API and zone import)
+	name, err = zoneio.NormalizeRRSetName(name, zone.Name)
+	if err != nil {
+		c.String(http.StatusBadRequest, `<div class="error">`+he(err.Error())+`</div>`)
+		return
+	}
 
 	// For CNAME data, treat "@" as zone apex and store FQDN
 	if strings.EqualFold(recType, "CNAME") && strings.TrimSpace(data) == "@" {
-		data = toFQDN("@", zone.Name)
+		data = zoneio.NormalizeFQDN(zone.Name)
 	}
 
 	ttl, _ := strconv.Atoi(ttlStr)
@@ -437,24 +442,6 @@ func (s *Server) deleteRecord(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-// toFQDN normalizes a relative name to FQDN within the given zone name.
-// If name is empty or "@", returns the zone origin with trailing dot.
-func toFQDN(name, zone string) string {
-	n := strings.TrimSpace(strings.ToLower(name))
-	// Treat trailing ".@" as convenience suffix for "relative to zone apex"
-	if strings.HasSuffix(n, ".@") {
-		n = strings.TrimSuffix(n, ".@")
-	}
-	z := strings.TrimSuffix(strings.ToLower(zone), ".")
-	if n == "" || n == "@" {
-		return z + "."
-	}
-	if strings.HasSuffix(n, ".") {
-		return n
-	}
-	return n + "." + z + "."
-}
-
 // splitMXData extracts priority and target if present, otherwise returns defaults.
 func splitMXData(data string) (int, string) {
 	fields := strings.Fields(strings.TrimSpace(data))
@@ -480,7 +467,7 @@ func combineMXData(data string, priority int, zoneName string) string {
 		}
 	}
 	if d == "@" {
-		d = toFQDN("@", zoneName)
+		d = zoneio.NormalizeFQDN(zoneName)
 	}
 	if priority < 0 {
 		priority = 0

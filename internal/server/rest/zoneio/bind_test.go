@@ -140,6 +140,12 @@ func TestNormalizeRRSetName(t *testing.T) {
         {"example.com", "example.com.", "example.com."},
         {"www.example.com", "example.com.", "www.example.com."},
         {"sub.www.example.com", "example.com.", "sub.www.example.com."},
+        {".@", "example.com.", "example.com."},
+        {"  www  ", "example.com.", "www.example.com."},
+        {"*", "example.com.", "*.example.com."},
+        {"_dmarc.example.com", "example.com", "_dmarc.example.com."},
+        // a label that only looks like the zone is still relative
+        {"myexample.com", "example.com.", "myexample.com.example.com."},
     }
     for _, tt := range tests {
         got, err := NormalizeRRSetName(tt.name, tt.zoneName)
@@ -161,6 +167,8 @@ func TestNormalizeRRSetName_InvalidZone(t *testing.T) {
         {"other.com.", "example.com."},
         {"hack.ru.", "example.com."},
         {"www.other.com.", "example.com."},
+        {"myexample.com.", "example.com."},
+        {"www.", "example.com."},
     }
     for _, tt := range tests {
         _, err := NormalizeRRSetName(tt.name, tt.zoneName)
