@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"namedot/internal/db"
+	"namedot/internal/server/rest/zoneio"
 )
 
 // he is available from zones.go (same package web)
@@ -226,7 +227,7 @@ func (s *Server) updateRecord(c *gin.Context) {
 
 	// If this RRSet is CNAME and data is "@", store apex FQDN
 	if strings.EqualFold(rrset.Type, "CNAME") && strings.TrimSpace(data) == "@" {
-		data = toFQDN("@", zone.Name)
+		data = zoneio.NormalizeFQDN(zone.Name)
 	}
 	if strings.EqualFold(rrset.Type, "MX") {
 		data = combineMXData(data, mxPriority, zone.Name)

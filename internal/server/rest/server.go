@@ -67,6 +67,8 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 
 	// Public endpoints (no auth)
 	r.GET("/health", s.health)
+	// HEAD for probes such as `wget --spider` (Docker HEALTHCHECK)
+	r.HEAD("/health", s.health)
 
 	// Web Admin UI
 	webAdmin, err := web.NewServer(cfg, db)
@@ -329,20 +331,6 @@ type rrsetReq struct {
 	Records []dbm.RData `json:"records"`
 }
 
-func fqdn(name, zone string) string {
-	n := strings.ToLower(name)
-	// Support convenience syntax: trailing ".@" means "relative to zone apex"
-	if strings.HasSuffix(n, ".@") {
-		n = strings.TrimSuffix(n, ".@")
-	}
-	n = strings.TrimSuffix(n, ".")
-	z := strings.TrimSuffix(strings.ToLower(zone), ".")
-	if n == "" || n == "@" {
-		return z + "."
-	}
-	return n + "." + z + "."
-}
-
 func (s *Server) createRRSet(c *gin.Context) {
 	var z dbm.Zone
 	if err := s.db.First(&z, c.Param("id")).Error; err != nil {
@@ -355,12 +343,16 @@ func (s *Server) createRRSet(c *gin.Context) {
 		return
 	}
 
-	name := strings.ToLower(fqdn(req.Name, z.Name))
+	name, err := zoneio.NormalizeRRSetName(req.Name, z.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	recordType := strings.ToUpper(req.Type)
 
 	// Check if RRSet already exists (zone_id, name, type must be unique)
 	var existing dbm.RRSet
-	err := s.db.Where("zone_id = ? AND name = ? AND type = ?", z.ID, name, recordType).First(&existing).Error
+	err = s.db.Where("zone_id = ? AND name = ? AND type = ?", z.ID, name, recordType).First(&existing).Error
 	if err == nil {
 		// RRSet already exists, return 409 Conflict
 		c.JSON(http.StatusConflict, gin.H{
@@ -389,7 +381,7 @@ func (s *Server) createRRSet(c *gin.Context) {
 	if strings.EqualFold(set.Type, "CNAME") {
 		for i := range set.Records {
 			if strings.TrimSpace(set.Records[i].Data) == "@" {
-				set.Records[i].Data = fqdn("@", z.Name)
+				set.Records[i].Data = zoneio.NormalizeFQDN(z.Name)
 			}
 		}
 	}
@@ -425,8 +417,29 @@ func (s *Server) updateRRSet(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	set.Name = strings.ToLower(fqdn(req.Name, z.Name))
-	set.Type = strings.ToUpper(req.Type)
+	name, err := zoneio.NormalizeRRSetName(req.Name, z.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	recordType := strings.ToUpper(req.Type)
+	// zone_id+name+type is unique: renaming onto another RRSet is a conflict,
+	// not a database error.
+	var other dbm.RRSet
+	err = s.db.Where("zone_id = ? AND name = ? AND type = ? AND id <> ?", z.ID, name, recordType, set.ID).First(&other).Error
+	if err == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "rrset already exists",
+			"message":     "Another record with this name and type already exists in this zone.",
+			"existing_id": other.ID,
+		})
+		return
+	} else if err != gorm.ErrRecordNotFound {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	set.Name = name
+	set.Type = recordType
 	set.TTL = req.TTL
 	if set.TTL == 0 && s.cfg.DefaultTTL > 0 {
 		set.TTL = s.cfg.DefaultTTL
@@ -435,7 +448,7 @@ func (s *Server) updateRRSet(c *gin.Context) {
 	if strings.EqualFold(set.Type, "CNAME") {
 		for i := range set.Records {
 			if strings.TrimSpace(set.Records[i].Data) == "@" {
-				set.Records[i].Data = fqdn("@", z.Name)
+				set.Records[i].Data = zoneio.NormalizeFQDN(z.Name)
 			}
 		}
 	}
@@ -469,14 +482,28 @@ func (s *Server) deleteRRSet(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
 		return
 	}
-	if err := s.db.Delete(&dbm.RRSet{}, "zone_id = ? AND id = ?", z.ID, c.Param("rid")).Error; err != nil {
+	// RData rows reference the RRSet without ON DELETE CASCADE, so they must go
+	// first or SQLite with foreign keys enabled rejects the delete. Both are
+	// plain DELETEs: no read-then-write window for a concurrent update.
+	var deleted bool
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		ids := tx.Model(&dbm.RRSet{}).Select("id").Where("zone_id = ? AND id = ?", z.ID, c.Param("rid"))
+		if err := tx.Where("rr_set_id IN (?)", ids).Delete(&dbm.RData{}).Error; err != nil {
+			return err
+		}
+		res := tx.Where("zone_id = ? AND id = ?", z.ID, c.Param("rid")).Delete(&dbm.RRSet{})
+		deleted = res.RowsAffected > 0
+		return res.Error
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	dbm.BumpSOASerial(s.db, z.ID)
-	// Invalidate DNS cache after zone record change
-	if s.dnsServer != nil {
-		s.dnsServer.InvalidateZoneCache()
+	// Nothing changed for a missing RRSet: keep the SOA serial and the cache.
+	if deleted {
+		dbm.BumpSOASerial(s.db, z.ID)
+		if s.dnsServer != nil {
+			s.dnsServer.InvalidateZoneCache()
+		}
 	}
 	c.Status(http.StatusNoContent)
 }
