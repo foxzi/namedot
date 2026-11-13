@@ -1,0 +1,13 @@
+Origin: namedot
+Label: namedot
+Suite: stable
+Codename: stable
+Architectures: amd64
+Components: main
+Description: namedot APT Repository
+MD5Sum:
+ 67f4bf345e6f760889ac0b39c4ed3330 719 main/binary-amd64/Packages
+ 1d85c217c5c6027daecd01f5cff62523 519 main/binary-amd64/Packages.gz
+SHA256:
+ 5faa7f988edc1cd079cc3c15d7642f9e743f51d2ce666dab9b773f82af23e92f 719 main/binary-amd64/Packages
+ 186e173813d07c19a310558854c050d8d9463117d21ca7c09be0b6a935761a98 519 main/binary-amd64/Packages.gz
