@@ -154,6 +154,8 @@ Examples (curl)
   - Get zone ID by name (requires jq):
     - `ZID=$(curl -sS -H 'Authorization: Bearer devtoken' 'http://127.0.0.1:8080/zones?name=example.com' | jq -r .id)`
 
+- RRSet name rules: `@` or empty is the zone apex; `www` is relative to the zone; `www.example.com` and `www.example.com.` are full names; a name with a trailing dot is absolute, so `www.` is outside the zone; names outside the zone return 400
+
 - Add A rrset (www)
   - `curl -sS -X POST -H 'Authorization: Bearer devtoken' -H 'Content-Type: application/json' \
      -d '{"name":"www","type":"A","ttl":300,"records":[{"data":"192.0.2.10"},{"data":"192.0.2.11"}]}' \
@@ -572,6 +574,8 @@ CLI флаги
   - Имя нормализуется: `EXAMPLE.COM` → `example.com.`, точка в конце добавляется автоматически
   - Получить ID зоны по имени (требуется jq):
     - `ZID=$(curl -sS -H 'Authorization: Bearer devtoken' 'http://127.0.0.1:8080/zones?name=example.com' | jq -r .id)`
+
+- Правила имени RRSet: `@` или пустое имя — вершина зоны; `www` — относительно зоны; `www.example.com` и `www.example.com.` — полные имена; имя с точкой на конце абсолютное, поэтому `www.` вне зоны; имена вне зоны дают 400
 
 - Добавить A rrset (www)
   - `curl -sS -X POST -H 'Authorization: Bearer devtoken' -H 'Content-Type: application/json' \
