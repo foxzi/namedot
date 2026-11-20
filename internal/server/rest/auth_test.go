@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -308,5 +309,110 @@ func TestBodyLimit_AppliesToAdminRoutes(t *testing.T) {
 
 	if cr.n > 11<<20 {
 		t.Fatalf("server read %d bytes of the body, limit is 10 MB", cr.n)
+	}
+}
+
+func hashToken(t *testing.T, token string) string {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("failed to generate bcrypt hash: %v", err)
+	}
+	return string(hash)
+}
+
+func getZones(router *gin.Engine, token string) int {
+	req := httptest.NewRequest("GET", "/zones", nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w.Code
+}
+
+func TestAuthMiddleware_NamedTokens(t *testing.T) {
+	billing := hashToken(t, "billing-secret")
+	monitoring := hashToken(t, "monitoring-secret")
+	legacy := hashToken(t, "legacy-secret")
+
+	tests := []struct {
+		name   string
+		cfg    *config.Config
+		token  string
+		status int
+	}{
+		{"first named token", &config.Config{APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}, {Name: "monitoring", Hash: monitoring}}}, "billing-secret", http.StatusOK},
+		{"second named token", &config.Config{APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}, {Name: "monitoring", Hash: monitoring}}}, "monitoring-secret", http.StatusOK},
+		{"wrong token", &config.Config{APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}}}, "wrong", http.StatusUnauthorized},
+		{"empty token", &config.Config{APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}}}, "", http.StatusUnauthorized},
+		{"named with legacy hash: named", &config.Config{APITokenHash: legacy, APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}}}, "billing-secret", http.StatusOK},
+		{"named with legacy hash: legacy", &config.Config{APITokenHash: legacy, APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}}}, "legacy-secret", http.StatusOK},
+		{"named with legacy plain: legacy", &config.Config{APIToken: "legacy-plain", APITokens: []config.APITokenConfig{{Name: "billing", Hash: billing}}}, "legacy-plain", http.StatusOK},
+		{"nothing configured", &config.Config{}, "any-token", http.StatusUnauthorized},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, router := setupTestServer(t, tt.cfg)
+			if got := getZones(router, tt.token); got != tt.status {
+				t.Errorf("Expected status %d, got %d", tt.status, got)
+			}
+		})
+	}
+}
+
+func TestAuthMiddleware_TokenCache(t *testing.T) {
+	cfg := &config.Config{APITokens: []config.APITokenConfig{{Name: "billing", Hash: hashToken(t, "billing-secret")}}}
+	server, router := setupTestServer(t, cfg)
+
+	for i := 0; i < 2; i++ {
+		if got := getZones(router, "billing-secret"); got != http.StatusOK {
+			t.Fatalf("request %d: expected status 200, got %d", i+1, got)
+		}
+	}
+	if len(server.tokenCache) != 1 {
+		t.Errorf("Expected 1 cached token, got %d", len(server.tokenCache))
+	}
+
+	// Failed matches must not be cached
+	if got := getZones(router, "wrong"); got != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d", got)
+	}
+	if len(server.tokenCache) != 1 {
+		t.Errorf("Expected 1 cached token after failed match, got %d", len(server.tokenCache))
+	}
+}
+
+func TestAPILog_TokenName(t *testing.T) {
+	var buf bytes.Buffer
+	oldWriter := gin.DefaultWriter
+	gin.DefaultWriter = &buf
+	defer func() { gin.DefaultWriter = oldWriter }()
+
+	cfg := &config.Config{
+		APITokenHash: hashToken(t, "legacy-secret"),
+		APITokens:    []config.APITokenConfig{{Name: "billing", Hash: hashToken(t, "billing-secret")}},
+	}
+	_, router := setupTestServer(t, cfg)
+
+	getZones(router, "billing-secret")
+	getZones(router, "legacy-secret")
+	getZones(router, "wrong-secret")
+	getZones(router, "")
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("Expected 4 log lines, got %d: %q", len(lines), buf.String())
+	}
+	for i, want := range []string{"token=billing", "token=default", "token=-", "token=-"} {
+		if !strings.HasSuffix(lines[i], want) {
+			t.Errorf("Log line %d: expected suffix %q, got %q", i, want, lines[i])
+		}
+	}
+	for _, secret := range []string{"billing-secret", "legacy-secret", "wrong-secret"} {
+		if strings.Contains(buf.String(), secret) {
+			t.Errorf("Log output contains token secret %q", secret)
+		}
 	}
 }

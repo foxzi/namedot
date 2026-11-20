@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestConfigValidation(t *testing.T) {
@@ -617,5 +619,51 @@ replication:
 
 	if cfg.Admin.Enabled {
 		t.Error("Expected admin to be auto-disabled in slave mode, but it's still enabled")
+	}
+}
+
+func TestConfigValidation_APITokens(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("failed to generate bcrypt hash: %v", err)
+	}
+	h := string(hash)
+
+	tests := []struct {
+		name          string
+		tokens        []APITokenConfig
+		expectedError string
+	}{
+		{"missing name", []APITokenConfig{{Hash: h}}, "api_tokens[0]: name is required"},
+		{"missing hash", []APITokenConfig{{Name: "billing"}}, "api_tokens[0]: hash is required"},
+		{"bad hash", []APITokenConfig{{Name: "billing", Hash: "not-a-hash"}}, "api_tokens[0]: hash is not a valid bcrypt hash"},
+		{"duplicate name", []APITokenConfig{{Name: "billing", Hash: h}, {Name: "billing", Hash: h}}, "api_tokens[1]: duplicate name"},
+		{"reserved name", []APITokenConfig{{Name: "default", Hash: h}}, "api_tokens[0]: name \"default\" is reserved"},
+		{"valid list", []APITokenConfig{{Name: "billing", Hash: h}, {Name: "monitoring", Hash: h}}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Listen:     "0.0.0.0:53",
+				RESTListen: "0.0.0.0:8080",
+				APITokens:  tt.tokens,
+				DB:         DBConfig{Driver: "sqlite", DSN: ":memory:"},
+				Performance: PerformanceConfig{
+					CacheSize:           1024,
+					DNSTimeoutSec:       2,
+					ForwarderTimeoutSec: 2,
+				},
+			}
+
+			err := cfg.Validate()
+			if tt.expectedError == "" {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
+				t.Errorf("Expected error containing %q, got: %v", tt.expectedError, err)
+			}
+		})
 	}
 }

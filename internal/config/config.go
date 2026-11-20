@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,6 +49,12 @@ type ReplicationConfig struct {
 	APIToken        string `yaml:"api_token"`         // API token for master authentication
 }
 
+// APITokenConfig is a named REST API token; the name is shown in API logs.
+type APITokenConfig struct {
+	Name string `yaml:"name"`
+	Hash string `yaml:"hash"` // bcrypt hash
+}
+
 type SOAConfig struct {
 	Primary       string `yaml:"primary"`         // MNAME (e.g. ns1.{zone})
 	Hostmaster    string `yaml:"hostmaster"`      // RNAME (e.g. hostmaster.{zone})
@@ -62,19 +69,20 @@ type NSConfig struct {
 }
 
 type Config struct {
-	Listen           string    `yaml:"listen"`
-	Forwarder        string    `yaml:"forwarder"`
-	EnableDNSSEC     bool      `yaml:"enable_dnssec"`
-	APIToken         string    `yaml:"api_token"`      // Plain text token (deprecated, use api_token_hash)
-	APITokenHash     string    `yaml:"api_token_hash"` // bcrypt hash of token (recommended)
-	RESTListen       string    `yaml:"rest_listen"`
-	TLSCertFile      string    `yaml:"tls_cert_file"`  // Path to TLS certificate file for HTTPS
-	TLSKeyFile       string    `yaml:"tls_key_file"`   // Path to TLS private key file for HTTPS
-	TLSReloadSec     int       `yaml:"tls_reload_sec"` // Certificate reload interval in seconds (0 = no reload)
-	AllowedCIDRs     []string  `yaml:"allowed_cidrs"`  // List of allowed CIDR blocks for REST API access (empty = allow all)
-	DefaultTTL       uint32    `yaml:"default_ttl"`
-	SOA              SOAConfig `yaml:"soa"`
-	NS               NSConfig  `yaml:"ns"`
+	Listen       string           `yaml:"listen"`
+	Forwarder    string           `yaml:"forwarder"`
+	EnableDNSSEC bool             `yaml:"enable_dnssec"`
+	APIToken     string           `yaml:"api_token"`      // Plain text token (deprecated, use api_token_hash)
+	APITokenHash string           `yaml:"api_token_hash"` // bcrypt hash of token (recommended)
+	APITokens    []APITokenConfig `yaml:"api_tokens"`     // Named tokens (bcrypt hashes), may be combined with api_token_hash
+	RESTListen   string           `yaml:"rest_listen"`
+	TLSCertFile  string           `yaml:"tls_cert_file"`  // Path to TLS certificate file for HTTPS
+	TLSKeyFile   string           `yaml:"tls_key_file"`   // Path to TLS private key file for HTTPS
+	TLSReloadSec int              `yaml:"tls_reload_sec"` // Certificate reload interval in seconds (0 = no reload)
+	AllowedCIDRs []string         `yaml:"allowed_cidrs"`  // List of allowed CIDR blocks for REST API access (empty = allow all)
+	DefaultTTL   uint32           `yaml:"default_ttl"`
+	SOA          SOAConfig        `yaml:"soa"`
+	NS           NSConfig         `yaml:"ns"`
 	// Deprecated: use soa.auto_on_missing instead
 	AutoSOAOnMissing bool `yaml:"auto_soa_on_missing"`
 
@@ -200,6 +208,27 @@ func (c *Config) Validate() error {
 	// Validate API token configuration
 	if c.APIToken != "" && c.APITokenHash != "" {
 		return fmt.Errorf("cannot specify both api_token and api_token_hash, use only api_token_hash (recommended)")
+	}
+
+	// Validate named API tokens ("default" is the name of the legacy tokens)
+	seenTokens := make(map[string]bool)
+	for i, t := range c.APITokens {
+		if t.Name == "" {
+			return fmt.Errorf("api_tokens[%d]: name is required", i)
+		}
+		if t.Name == "default" {
+			return fmt.Errorf("api_tokens[%d]: name \"default\" is reserved for api_token/api_token_hash", i)
+		}
+		if seenTokens[t.Name] {
+			return fmt.Errorf("api_tokens[%d]: duplicate name %q", i, t.Name)
+		}
+		seenTokens[t.Name] = true
+		if t.Hash == "" {
+			return fmt.Errorf("api_tokens[%d]: hash is required", i)
+		}
+		if _, err := bcrypt.Cost([]byte(t.Hash)); err != nil {
+			return fmt.Errorf("api_tokens[%d]: hash is not a valid bcrypt hash: %w", i, err)
+		}
 	}
 
 	// Warn if using plain text token (deprecated)

@@ -23,6 +23,8 @@ replication:
 - Разрешает изменения через REST API и веб-интерфейс
 - Является источником данных для слейв-серверов
 
+Токен для слейва выдаётся на мастере как запись в `api_tokens` (например, `name: "slave-ns1"`), имя будет видно в логах API мастера. Подробнее: [README.md](README.md).
+
 ### Slave сервер
 
 ```yaml
@@ -264,6 +266,8 @@ Master server:
 - Accepts requests to `/sync/export` and returns all data
 - Allows modifications via REST API and web interface
 - Acts as the data source for slave servers
+
+Issue the slave's token on the master as an `api_tokens` entry (for example `name: "slave-ns1"`); the name is shown in the master's API logs. See [README.md](README.md) for details.
 
 ### Slave Server
 

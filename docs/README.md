@@ -98,7 +98,23 @@ log:
   sql_debug: false  # Set to true to log all SQL queries (for debugging)
 ```
 
-Note: REST API requests are rejected unless `api_token` or `api_token_hash` is configured.
+Note: REST API requests are rejected unless `api_tokens`, `api_token_hash` or `api_token` is configured.
+
+### Named API tokens
+`api_tokens` lets several clients use the REST API, each with its own token. The token name is written to the API log (`API GET /zones 200 1ms from 10.0.0.5 token=billing`; `token=-` for unauthenticated requests, `token=default` for legacy `api_token_hash` / `api_token`). The token itself is never logged.
+
+```yaml
+api_tokens:
+  - name: "billing"
+    hash: "$2a$10$..."   # bcrypt hash from --gen-token
+  - name: "monitoring"
+    hash: "$2a$10$..."
+```
+
+- Names must be unique and non-empty; `default` is reserved for the legacy `api_token_hash` / `api_token`, which can still be used together with `api_tokens`.
+- Issue a token: `namedot --gen-token "$(openssl rand -hex 32)"`, add the printed `name`/`hash` entry to `api_tokens`, restart the server. Give the plain token to the client (`Authorization: Bearer <token>`).
+- Revoke a token: remove its entry from `api_tokens`, restart the server.
+
 
 2) Build and run:
 - `go build ./cmd/namedot`
@@ -520,6 +536,23 @@ log:
   dns_verbose: true
   sql_debug: false  # Установите true для логирования SQL запросов (отладка)
 ```
+
+Примечание: запросы к REST API отклоняются, пока не задан `api_tokens`, `api_token_hash` или `api_token`.
+
+### Именованные API токены
+`api_tokens` позволяет нескольким клиентам использовать REST API, у каждого свой токен. Имя токена пишется в лог API (`API GET /zones 200 1ms from 10.0.0.5 token=billing`; `token=-` для неавторизованных запросов, `token=default` для устаревших `api_token_hash` / `api_token`). Сам токен в лог не попадает.
+
+```yaml
+api_tokens:
+  - name: "billing"
+    hash: "$2a$10$..."   # bcrypt-хеш из --gen-token
+  - name: "monitoring"
+    hash: "$2a$10$..."
+```
+
+- Имена должны быть уникальными и непустыми; `default` зарезервировано для устаревших `api_token_hash` / `api_token`, их можно использовать вместе с `api_tokens`.
+- Выдать токен: `namedot --gen-token "$(openssl rand -hex 32)"`, добавить выведенную запись `name`/`hash` в `api_tokens`, перезапустить сервер. Клиенту передать сам токен (`Authorization: Bearer <token>`).
+- Отозвать токен: удалить запись из `api_tokens`, перезапустить сервер.
 
 2) Сборка и запуск:
 - `go build ./cmd/namedot`

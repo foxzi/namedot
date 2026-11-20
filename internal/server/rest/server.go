@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +35,11 @@ type Server struct {
 	httpServer *http.Server
 	tlsStopCh  chan struct{}
 	dnsServer  DNSServer
+
+	// Successful token matches: sha256(token) -> token name. Only valid tokens are
+	// stored, so the cache is bounded by the number of configured tokens.
+	tokenCacheMu sync.RWMutex
+	tokenCache   map[[sha256.Size]byte]string
 }
 
 func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
@@ -40,12 +47,18 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 	r := gin.New()
 	// Log all API requests to stdout
 	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return fmt.Sprintf("API %s %s %d %s from %s\n",
+		// Log the token name only, never the token itself
+		tokenName := "-"
+		if name, ok := param.Keys["api_token_name"].(string); ok {
+			tokenName = name
+		}
+		return fmt.Sprintf("API %s %s %d %s from %s token=%s\n",
 			param.Method,
 			param.Path,
 			param.StatusCode,
 			param.Latency,
 			param.ClientIP,
+			tokenName,
 		)
 	}))
 	r.Use(gin.Recovery())
@@ -63,7 +76,7 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 		c.Next()
 	})
 
-	s := &Server{cfg: cfg, db: db, r: r, dnsServer: dnsServer}
+	s := &Server{cfg: cfg, db: db, r: r, dnsServer: dnsServer, tokenCache: make(map[[sha256.Size]byte]string)}
 
 	// Public endpoints (no auth)
 	r.GET("/health", s.health)
@@ -83,32 +96,19 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 	}
 
 	auth := func(c *gin.Context) {
-		token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
-
-		// Check if token is valid using either hash or plain text
-		authenticated := false
-
-		// Try hashed token first (recommended)
-		if s.cfg.APITokenHash != "" {
-			if err := bcrypt.CompareHashAndPassword([]byte(s.cfg.APITokenHash), []byte(token)); err == nil {
-				authenticated = true
-			}
-		} else if s.cfg.APIToken != "" {
-			// Fallback to plain text comparison (deprecated)
-			if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.APIToken)) == 1 {
-				authenticated = true
-			}
-		} else {
+		if len(cfg.APITokens) == 0 && cfg.APITokenHash == "" && cfg.APIToken == "" {
 			// No authentication configured: reject all requests (secure default)
 			log.Printf("REST API authentication not configured; rejecting request")
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
-		if !authenticated {
+		name, ok := s.matchToken(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+		if !ok {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
+		c.Set("api_token_name", name)
 		c.Next()
 	}
 
@@ -134,6 +134,50 @@ func NewServer(cfg *config.Config, db *gorm.DB, dnsServer DNSServer) *Server {
 		api.POST("/sync/import", s.syncImport)
 	}
 	return s
+}
+
+// matchToken returns the name of the configured token matching the given one.
+// Legacy api_token_hash / api_token are named "default".
+func (s *Server) matchToken(token string) (string, bool) {
+	if token == "" {
+		return "", false
+	}
+
+	key := sha256.Sum256([]byte(token))
+	s.tokenCacheMu.RLock()
+	name, ok := s.tokenCache[key]
+	s.tokenCacheMu.RUnlock()
+	if ok {
+		return name, true
+	}
+
+	name, ok = s.checkToken(token)
+	if ok {
+		s.tokenCacheMu.Lock()
+		s.tokenCache[key] = name
+		s.tokenCacheMu.Unlock()
+	}
+	return name, ok
+}
+
+// checkToken compares the token with the configured ones (slow: bcrypt).
+func (s *Server) checkToken(token string) (string, bool) {
+	for _, t := range s.cfg.APITokens {
+		if bcrypt.CompareHashAndPassword([]byte(t.Hash), []byte(token)) == nil {
+			return t.Name, true
+		}
+	}
+	if s.cfg.APITokenHash != "" {
+		if bcrypt.CompareHashAndPassword([]byte(s.cfg.APITokenHash), []byte(token)) == nil {
+			return "default", true
+		}
+	} else if s.cfg.APIToken != "" {
+		// Plain text comparison (deprecated)
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.APIToken)) == 1 {
+			return "default", true
+		}
+	}
+	return "", false
 }
 
 func (s *Server) Start() error {

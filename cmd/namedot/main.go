@@ -135,8 +135,11 @@ func main() {
 			log.Fatalf("error generating bcrypt: %v", err)
 		}
 		fmt.Printf("Bcrypt hash for API token '%s':\n%s\n", token, string(hash))
-		fmt.Println("\nAdd this to your config.yaml:")
-		fmt.Printf("api_token_hash: \"%s\"\n", string(hash))
+		fmt.Println("\nAdd this to your config.yaml (use a name that identifies the client, it is shown in API logs):")
+		fmt.Println("api_tokens:")
+		fmt.Println("  - name: \"service-name\"")
+		fmt.Printf("    hash: \"%s\"\n", string(hash))
+		fmt.Println("\n(The single api_token_hash: \"<hash>\" option still works.)")
 		fmt.Println("\nFor replication slave config:")
 		fmt.Println("replication:")
 		fmt.Println("  mode: slave")
