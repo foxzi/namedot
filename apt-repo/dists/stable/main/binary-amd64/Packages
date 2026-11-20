@@ -1,0 +1,24 @@
+Package: namedot
+Version: 0.3.21
+Architecture: amd64
+Maintainer: Sergei Vorontsov <piligrim@rootnix.net>
+Installed-Size: 20947
+Recommends: systemd, sqlite3
+Filename: pool/main/namedot_0.3.21_amd64.deb
+Size: 8007116
+MD5sum: 3d8dd15cb2f7bbc51198dfabd3f0fe34
+SHA1: 6753bf314dd797186d496832ff609e3ddb57f362
+SHA256: 676784d7e299dcdbcfd9cf080b111775478a3c99dedd2d067592f174956348ee
+Section: net
+Priority: optional
+Homepage: https://github.com/foxzi/namedot
+Description: Lightweight DNS server with REST API and GeoDNS support
+ .
+ Features:
+ - UDP/TCP DNS server
+ - REST API for zone management
+ - GeoDNS with country/continent/subnet support
+ - SQLite/PostgreSQL/MySQL backend
+ - Master-Slave replication
+ - Web admin panel
+
