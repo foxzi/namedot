@@ -21,22 +21,24 @@ Comprehensive unit tests for the REST API authentication middleware.
 - Invalid token rejection
 - Fallback behavior when hash is not configured
 
-**3. No Authentication Configured**
-- Permissive behavior (allows all requests)
-- Security recommendation documentation
-- Edge cases with tokens when auth is disabled
+**3. Named Tokens (`api_tokens`)**
+- Several named tokens, each authenticates independently
+- Combination with legacy `api_token_hash` / `api_token` (logged as `default`)
+- Cache of successful matches (failed matches are not cached)
+- API log line contains the token name (`token=billing`, `token=-`) and never the token itself
 
-**4. Security Edge Cases**
+**4. No Authentication Configured**
+- Secure default: all requests are rejected with 401
+
+**5. Security Edge Cases**
 - Bearer prefix handling (case-sensitive)
 - Empty token handling
 - Token without Bearer prefix
 - Both hash and plain token configured
 
-**5. Security Recommendations**
+**6. Security Recommendations**
 The tests document important security considerations:
-- When no authentication is configured, the API allows all requests
-- Recommended: Require explicit configuration or fail-safe defaults
-- Tests provide documentation for future security improvements
+- When no authentication is configured, the API rejects all requests (fail-safe default)
 
 #### Running Authentication Tests
 
@@ -147,9 +149,8 @@ The tests use SQLite in-memory databases which have some limitations:
 - Production databases (Postgres/MySQL) will have more comprehensive constraint checking
 
 ### Security Considerations
-1. **Authentication Tests** document the current permissive behavior when no auth is configured
-2. Tests include recommendations for improving security defaults
-3. Edge cases are documented for awareness
+1. **Authentication Tests** verify that the API rejects all requests when no auth is configured
+2. Edge cases are documented for awareness
 
 ### Hard Delete vs Soft Delete
 - Tests verify that replication uses hard delete (Unscoped)

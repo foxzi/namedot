@@ -49,7 +49,7 @@ This directory contains example configuration files for various namedot deployme
 
 3. Generate required secrets:
    ```bash
-   # Generate API token hash
+   # Generate API token hash (for an api_tokens entry or api_token_hash)
    ./namedot -g your-secret-token
 
    # Generate admin password hash
@@ -75,6 +75,7 @@ All examples support the following key features:
 ### REST API Security
 - `api_tokens` - Named API tokens (`name` + bcrypt `hash`), the name is shown in API logs
 - `api_token_hash` - Bcrypt hash of a single API token (logged as `default`)
+- `api_token` - Deprecated plain-text API token (logged as `default`)
 - `allowed_cidrs` - IP-based access control (CIDR whitelist)
 - `tls_cert_file` / `tls_key_file` - HTTPS/TLS configuration
 

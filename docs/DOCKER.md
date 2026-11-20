@@ -118,7 +118,7 @@ dig @localhost -p 8053 www.example11.com A +subnet=127.0.2.1
 
 For production use:
 
-1. **Change the API token** in your config file
+1. **Change the API token** in your config file (prefer named `api_tokens` with bcrypt hashes, see [README.md](README.md))
 2. **Use a proper database** (PostgreSQL or MySQL recommended)
 3. **Mount production GeoIP databases** (e.g., MaxMind GeoLite2)
 4. **Configure resource limits** in docker-compose.yml:
@@ -278,7 +278,9 @@ volumes:
 **config.master.yaml**:
 ```yaml
 listen: "0.0.0.0:53"
-api_token: "your-secure-token"
+api_tokens:                  # one named token per client/slave
+  - name: "slave1"
+    hash: "$2a$10$..."       # namedot --gen-token "<token used in slave1 replication.api_token>"
 rest_listen: "0.0.0.0:8080"
 
 db:
@@ -305,6 +307,8 @@ replication:
   sync_interval_sec: 30
   api_token: "your-secure-token"
 ```
+
+The slave sends its plain `replication.api_token`; the master matches it against its `api_tokens` hashes and shows the entry name in its API log (`token=slave1`). Add a separate entry per slave. See [README.md](README.md) for named tokens.
 
 ### Running Replication Setup
 

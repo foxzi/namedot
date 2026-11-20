@@ -3,6 +3,13 @@ forwarder: ""
 enable_dnssec: false
 # api_token: "change-me-in-production"  # Deprecated: use api_token_hash instead
 api_token_hash: ""  # Generate with: ./namedot --gen-token yourToken
+# Named tokens: the name is shown in API logs. Issue: ./namedot --gen-token "$(openssl rand -hex 32)",
+# add the entry, restart. Revoke: remove the entry, restart. "default" is a reserved name.
+# api_tokens:
+#   - name: "billing"
+#     hash: "$2a$10$..."
+#   - name: "slave-ns1"
+#     hash: "$2a$10$..."
 rest_listen: "0.0.0.0:8080"
 # tls_cert_file: "/path/to/cert.pem"  # Path to TLS certificate for HTTPS
 # tls_key_file: "/path/to/key.pem"    # Path to TLS private key for HTTPS

@@ -67,7 +67,10 @@ Quick Start
 listen: ":53"
 forwarder: "8.8.8.8"
 enable_dnssec: false
-api_token: "devtoken"
+api_token: "devtoken"  # dev only; for production use api_tokens (see "Named API tokens" below)
+# api_tokens:          # recommended for production: one bcrypt hash per client
+#   - name: "billing"
+#     hash: "$2a$10$..."   # namedot --gen-token "$(openssl rand -hex 32)"
 rest_listen: ":8080"
 default_ttl: 300
 soa:
@@ -432,6 +435,8 @@ Features:
 
 If `allowed_cidrs` is not specified or empty, all IPs are allowed (default behavior).
 
+Note: entries are CIDR blocks, so `127.0.0.0/32` matches only `127.0.0.0`. Use `127.0.0.1/32` or `127.0.0.0/8` to allow local requests (e.g. health checks). Requests from non-allowed IPs get `403` before the token check.
+
 ---
 
 # Русская версия / Russian Version
@@ -506,7 +511,10 @@ sudo systemctl start namedot
 listen: ":53"
 forwarder: "8.8.8.8"
 enable_dnssec: false
-api_token: "devtoken"
+api_token: "devtoken"  # только для разработки; в production используйте api_tokens (см. "Именованные API токены" ниже)
+# api_tokens:          # рекомендуется для production: свой bcrypt-хеш на каждого клиента
+#   - name: "billing"
+#     hash: "$2a$10$..."   # namedot --gen-token "$(openssl rand -hex 32)"
 rest_listen: ":8080"
 default_ttl: 300
 soa:
@@ -869,6 +877,8 @@ allowed_cidrs:
 - **Reverse Proxy**: ACL проверяет прямой IP подключения. Если стоит прокси, добавьте IP прокси в ACL или настраивайте ограничения в прокси/фаерволе.
 
 Если `allowed_cidrs` не указан или пуст, доступ разрешён всем IP (поведение по умолчанию).
+
+Примечание: записи - это CIDR-блоки, поэтому `127.0.0.0/32` соответствует только адресу `127.0.0.0`. Чтобы разрешить локальные запросы (например, health check), используйте `127.0.0.1/32` или `127.0.0.0/8`. Запросы с неразрешённых IP получают `403` до проверки токена.
 
 ## License
 

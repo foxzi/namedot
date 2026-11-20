@@ -49,4 +49,4 @@ replication:
   mode: "slave"
   master_url: "http://master-server:8080"  # URL of the master server
   sync_interval_sec: 60  # Sync every 60 seconds
-  api_token: "your-secure-token-here"  # Same token as on master
+  api_token: "your-secure-token-here"  # Plain token; master must have its bcrypt hash in api_tokens (or api_token_hash / api_token)

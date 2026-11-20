@@ -12,6 +12,7 @@ Lightweight GeoDNS server with REST API, Web Admin Panel, and Master-Slave repli
 - **Multiple Backends**: SQLite, PostgreSQL, MySQL support
 - **HTTPS Support**: TLS/SSL with automatic certificate reloading
 - **Access Control**: IP-based CIDR whitelisting for REST API
+- **Named API Tokens**: per-client REST API tokens, token name is shown in API logs
 
 ## Quick Start
 
@@ -29,7 +30,7 @@ make build
 ./namedot -c config.yaml
 ```
 
-Note: REST API requests are rejected unless `api_token` or `api_token_hash` is configured.
+Note: REST API requests are rejected unless `api_tokens`, `api_token_hash` or `api_token` is configured. `api_tokens` gives each client its own named token (the name is shown in API logs); see [Full README](./docs/README.md).
 
 ## Documentation
 

@@ -23,7 +23,14 @@ replication:
 - Разрешает изменения через REST API и веб-интерфейс
 - Является источником данных для слейв-серверов
 
-Токен для слейва выдаётся на мастере как запись в `api_tokens` (например, `name: "slave-ns1"`), имя будет видно в логах API мастера. Подробнее: [README.md](README.md).
+Рекомендуется выдавать каждому слейву отдельный именованный токен - запись в `api_tokens` на мастере (например, `name: "slave-ns1"`, `name: "slave-ns2"`): имя видно в логах API мастера, а токен одного слейва можно отозвать, не затрагивая остальные. Подробнее: [README.md](README.md).
+
+```yaml
+# на мастере
+api_tokens:
+  - name: "slave-ns1"
+    hash: "$2a$10$..."   # namedot --gen-token "$(openssl rand -hex 32)"
+```
 
 ### Slave сервер
 
@@ -39,7 +46,7 @@ replication:
 - **mode**: должен быть `"slave"`
 - **master_url**: URL мастер-сервера (с протоколом и портом)
 - **sync_interval_sec**: интервал синхронизации в секундах (по умолчанию 60)
-- **api_token**: токен для авторизации на мастер-сервере
+- **api_token**: токен (в открытом виде) для авторизации на мастер-сервере; на мастере должен соответствовать одной из записей `api_tokens`
 
 **Важно**: При включении режима `slave` автоматически отключаются:
 - `admin.enabled: false` - веб-интерфейс администратора
@@ -191,7 +198,7 @@ curl -H "Authorization: Bearer your-token" http://slave:8080/zones
 master returned status 401: Unauthorized
 ```
 
-Решение: убедитесь что `replication.api_token` на слейве совпадает с `api_token` на мастере.
+Решение: убедитесь что `replication.api_token` на слейве совпадает с одним из токенов на мастере (запись `api_tokens`, `api_token_hash` или `api_token`). В логе мастера успешные запросы синхронизации выглядят как `API GET /sync/export 200 325ms from 1.2.3.4 token=replication` - имя токена помогает понять, какой слейв (и с каким токеном) обращается; `token=-` означает, что запрос не авторизован. Если слейв получает 403, проверьте `allowed_cidrs` на мастере.
 
 ### Медленная синхронизация
 
@@ -267,7 +274,14 @@ Master server:
 - Allows modifications via REST API and web interface
 - Acts as the data source for slave servers
 
-Issue the slave's token on the master as an `api_tokens` entry (for example `name: "slave-ns1"`); the name is shown in the master's API logs. See [README.md](README.md) for details.
+Use a dedicated named token per slave: an `api_tokens` entry on the master (for example `name: "slave-ns1"`, `name: "slave-ns2"`). The name is shown in the master's API logs, and one slave's token can be revoked without affecting the others. See [README.md](README.md) for details.
+
+```yaml
+# on the master
+api_tokens:
+  - name: "slave-ns1"
+    hash: "$2a$10$..."   # namedot --gen-token "$(openssl rand -hex 32)"
+```
 
 ### Slave Server
 
@@ -283,7 +297,7 @@ Slave parameters:
 - **mode**: must be `"slave"`
 - **master_url**: master server URL (with protocol and port)
 - **sync_interval_sec**: synchronization interval in seconds (default: 60)
-- **api_token**: token for master server authentication
+- **api_token**: plain token for master server authentication; the master must have a matching entry in `api_tokens`
 
 **Important**: When `slave` mode is enabled, the following are automatically disabled:
 - `admin.enabled: false` - web admin interface
@@ -435,7 +449,7 @@ curl -H "Authorization: Bearer your-token" http://slave:8080/zones
 master returned status 401: Unauthorized
 ```
 
-Solution: ensure `replication.api_token` on slave matches `api_token` on master.
+Solution: ensure `replication.api_token` on the slave matches one of the tokens on the master (an `api_tokens` entry, `api_token_hash` or `api_token`). In the master log, successful sync requests look like `API GET /sync/export 200 325ms from 1.2.3.4 token=replication` - the token name shows which slave (and which token) is calling; `token=-` means the request was not authenticated. If the slave gets 403, check `allowed_cidrs` on the master.
 
 ### Slow synchronization
 
